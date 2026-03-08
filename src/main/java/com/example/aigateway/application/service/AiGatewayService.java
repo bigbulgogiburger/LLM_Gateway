@@ -5,6 +5,7 @@ import com.example.aigateway.api.request.AiChatRequest.Message;
 import com.example.aigateway.api.response.AiChatData;
 import com.example.aigateway.api.response.AiChatResponse;
 import com.example.aigateway.api.response.AiGuardrailView;
+import com.example.aigateway.api.response.AiChatStreamEvent;
 import com.example.aigateway.api.response.GuardrailView;
 import com.example.aigateway.api.response.ModerationView;
 import com.example.aigateway.api.response.OutputGuardrailView;
@@ -31,10 +32,13 @@ import com.example.aigateway.domain.provider.ProviderRouter;
 import com.example.aigateway.domain.security.GatewayPrincipal;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @Service
 public class AiGatewayService {
@@ -85,6 +89,8 @@ public class AiGatewayService {
         }
         String inputText = resolveInputText(request);
         quotaEnforcementService.checkAndConsumeRequest(principal, inputText);
+        LlmProvider provider = providerRouter.route(request.provider());
+        validateProviderCapabilities(provider, request);
         AiGatewayCommand command = new AiGatewayCommand(
                 requestIdGenerator.generate(),
                 principal.tenantId(),
@@ -138,7 +144,6 @@ public class AiGatewayService {
             return response;
         }
 
-        LlmProvider provider = providerRouter.route(command.provider());
         String content = providerExecutionService.execute(() -> provider.generate(command));
         ModerationAssessment outputModeration = moderationService.assessOutput(content, command);
         if (outputModeration.blocks()) {
@@ -204,6 +209,22 @@ public class AiGatewayService {
         gatewayMetricsService.recordOutcome(provider.name(), "success", command.tenantId());
         gatewayMetricsService.recordLatency(provider.name(), "success", command.tenantId(), elapsedMillis);
         return response;
+    }
+
+    public SseEmitter stream(AiChatRequest request, GatewayPrincipal principal) {
+        LlmProvider provider = providerRouter.route(request.provider());
+        if (!provider.capabilities().supportsStreaming()) {
+            throw new GatewayException(
+                    GatewayErrorCodes.PROVIDER_CAPABILITY_NOT_SUPPORTED,
+                    HttpStatus.BAD_REQUEST,
+                    "선택한 provider는 streaming을 지원하지 않습니다."
+            );
+        }
+
+        AiChatResponse response = process(request, principal);
+        SseEmitter emitter = new SseEmitter(30_000L);
+        CompletableFuture.runAsync(() -> emitStream(emitter, response));
+        return emitter;
     }
 
     private AiChatResponse buildBlockedResponse(
@@ -296,6 +317,77 @@ public class AiGatewayService {
             return sanitized;
         }
         return sanitized.substring(0, 40) + "...";
+    }
+
+    private void emitStream(SseEmitter emitter, AiChatResponse response) {
+        try {
+            if (!"SUCCESS".equals(response.status()) || response.data() == null) {
+                emitter.send(SseEmitter.event()
+                        .name("blocked")
+                        .data(new AiChatStreamEvent(
+                                "blocked",
+                                response.requestId(),
+                                response.provider(),
+                                response.status(),
+                                null
+                        )));
+                emitter.complete();
+                return;
+            }
+
+            for (String chunk : chunkContent(response.data().content(), 48)) {
+                emitter.send(SseEmitter.event()
+                        .name("chunk")
+                        .data(new AiChatStreamEvent(
+                                "chunk",
+                                response.requestId(),
+                                response.provider(),
+                                response.status(),
+                                chunk
+                        )));
+            }
+            emitter.send(SseEmitter.event()
+                    .name("done")
+                    .data(new AiChatStreamEvent(
+                            "done",
+                            response.requestId(),
+                            response.provider(),
+                            response.status(),
+                            null
+                    )));
+            emitter.complete();
+        } catch (Exception exception) {
+            emitter.completeWithError(exception);
+        }
+    }
+
+    private List<String> chunkContent(String content, int chunkSize) {
+        List<String> chunks = new ArrayList<>();
+        if (content == null || content.isBlank()) {
+            return chunks;
+        }
+        for (int start = 0; start < content.length(); start += chunkSize) {
+            int end = Math.min(content.length(), start + chunkSize);
+            chunks.add(content.substring(start, end));
+        }
+        return chunks;
+    }
+
+    private void validateProviderCapabilities(LlmProvider provider, AiChatRequest request) {
+        if (request.messages() != null && !request.messages().isEmpty() && !provider.capabilities().supportsMessages()) {
+            throw new GatewayException(
+                    GatewayErrorCodes.PROVIDER_CAPABILITY_NOT_SUPPORTED,
+                    HttpStatus.BAD_REQUEST,
+                    "선택한 provider는 messages 기반 요청을 지원하지 않습니다."
+            );
+        }
+        if (request.responseFormat() != null && !provider.capabilities().supportsStructuredOutputs()) {
+            throw new GatewayException(
+                    GatewayErrorCodes.PROVIDER_CAPABILITY_NOT_SUPPORTED,
+                    HttpStatus.BAD_REQUEST,
+                    "선택한 provider는 structured output을 지원하지 않습니다."
+            );
+        }
     }
 
     private String resolveInputText(AiChatRequest request) {

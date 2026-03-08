@@ -90,6 +90,19 @@ curl -X POST http://localhost:8090/api/ai/chat \
   }'
 ```
 
+SSE 기반 스트리밍 응답이 필요하면 `/api/ai/chat/stream`을 사용할 수 있다.
+
+```bash
+curl -N -X POST http://localhost:8090/api/ai/chat/stream \
+  -H "X-API-Key: local-dev-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user-001",
+    "provider": "mock",
+    "prompt": "이번 주 수리 현황을 요약해줘"
+  }'
+```
+
 ## 주요 구조
 
 - `Input Rule Guardrail`: 금지어, PII, 프롬프트 길이, 역할 정책
@@ -183,6 +196,13 @@ curl "http://localhost:8090/api/admin/audits/search?q=수리" \
 ```
 
 PostgreSQL을 사용할 때 audit 검색은 `to_tsvector`와 `websearch_to_tsquery` 기반 full-text search로 동작한다.
+
+provider capability 조회:
+
+```bash
+curl http://localhost:8090/api/admin/providers \
+  -H "X-API-Key: local-admin-api-key"
+```
 
 ## Redis/PostgreSQL 실행
 

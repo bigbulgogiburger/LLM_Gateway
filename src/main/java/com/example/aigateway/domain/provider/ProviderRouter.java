@@ -19,4 +19,8 @@ public class ProviderRouter {
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("지원하지 않는 provider 입니다: " + providerName));
     }
+
+    public List<LlmProvider> providers() {
+        return List.copyOf(providers);
+    }
 }

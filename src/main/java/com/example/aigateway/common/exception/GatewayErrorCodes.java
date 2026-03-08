@@ -7,6 +7,7 @@ public final class GatewayErrorCodes {
     public static final String QUOTA_EXCEEDED = "QUOTA_EXCEEDED";
     public static final String PROVIDER_NOT_ALLOWED = "PROVIDER_NOT_ALLOWED";
     public static final String PROVIDER_EXECUTION_FAILED = "PROVIDER_EXECUTION_FAILED";
+    public static final String PROVIDER_CAPABILITY_NOT_SUPPORTED = "PROVIDER_CAPABILITY_NOT_SUPPORTED";
     public static final String VALIDATION_ERROR = "VALIDATION_ERROR";
     public static final String RESOURCE_NOT_FOUND = "RESOURCE_NOT_FOUND";
     public static final String FORBIDDEN = "FORBIDDEN";

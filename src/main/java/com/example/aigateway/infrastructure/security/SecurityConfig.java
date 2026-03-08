@@ -1,5 +1,6 @@
 package com.example.aigateway.infrastructure.security;
 
+import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.security.config.Customizer;
@@ -29,6 +30,7 @@ public class SecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler)
                 )
                 .authorizeHttpRequests(auth -> auth
+                        .dispatcherTypeMatchers(DispatcherType.ASYNC).permitAll()
                         .requestMatchers("/actuator", "/actuator/health", "/actuator/info").permitAll()
                         .requestMatchers("/actuator/metrics/**", "/actuator/prometheus").hasRole("ADMIN")
                         .requestMatchers("/api/admin/**").hasRole("ADMIN")

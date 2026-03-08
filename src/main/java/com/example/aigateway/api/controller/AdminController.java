@@ -2,11 +2,13 @@ package com.example.aigateway.api.controller;
 
 import com.example.aigateway.application.dto.AuditSearchItem;
 import com.example.aigateway.application.dto.TenantPolicyOverrideHistoryItem;
+import com.example.aigateway.api.response.ProviderCapabilityView;
 import com.example.aigateway.application.service.AuditSearchService;
 import com.example.aigateway.common.exception.GatewayErrorCodes;
 import com.example.aigateway.common.exception.GatewayException;
 import com.example.aigateway.domain.guardrail.result.ResolvedGuardrailPolicy;
 import com.example.aigateway.domain.guardrail.service.GuardrailPolicyResolver;
+import com.example.aigateway.domain.provider.ProviderRouter;
 import com.example.aigateway.application.service.TenantPolicyAdminService;
 import com.example.aigateway.domain.security.GatewayPrincipal;
 import com.example.aigateway.infrastructure.config.GatewayTenantPolicyProperties;
@@ -28,15 +30,18 @@ public class AdminController {
     private final TenantPolicyAdminService tenantPolicyAdminService;
     private final AuditSearchService auditSearchService;
     private final GuardrailPolicyResolver guardrailPolicyResolver;
+    private final ProviderRouter providerRouter;
 
     public AdminController(
             TenantPolicyAdminService tenantPolicyAdminService,
             AuditSearchService auditSearchService,
-            GuardrailPolicyResolver guardrailPolicyResolver
+            GuardrailPolicyResolver guardrailPolicyResolver,
+            ProviderRouter providerRouter
     ) {
         this.tenantPolicyAdminService = tenantPolicyAdminService;
         this.auditSearchService = auditSearchService;
         this.guardrailPolicyResolver = guardrailPolicyResolver;
+        this.providerRouter = providerRouter;
     }
 
     @GetMapping("/tenants/{tenantId}/policy/override")
@@ -92,6 +97,20 @@ public class AdminController {
             @AuthenticationPrincipal GatewayPrincipal principal
     ) {
         return auditSearchService.search(principal.tenantId(), q);
+    }
+
+    @GetMapping("/providers")
+    public List<ProviderCapabilityView> listProviders() {
+        return providerRouter.providers().stream()
+                .map(provider -> new ProviderCapabilityView(
+                        provider.name(),
+                        provider.capabilities().supportsMessages(),
+                        provider.capabilities().supportsStructuredOutputs(),
+                        provider.capabilities().supportsStreaming(),
+                        provider.capabilities().supportsToolUse(),
+                        provider.capabilities().supportsModeration()
+                ))
+                .toList();
     }
 
     private void ensureTenantAccess(GatewayPrincipal principal, String tenantId) {

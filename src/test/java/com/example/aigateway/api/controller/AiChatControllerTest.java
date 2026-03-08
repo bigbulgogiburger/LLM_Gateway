@@ -2,6 +2,8 @@ package com.example.aigateway.api.controller;
 
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.asyncDispatch;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.request;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -12,6 +14,7 @@ import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMock
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.servlet.MockMvc;
+import org.springframework.test.web.servlet.MvcResult;
 
 @SpringBootTest
 @AutoConfigureMockMvc
@@ -109,5 +112,27 @@ class AiChatControllerTest {
         mockMvc.perform(get("/actuator/metrics")
                         .header("X-API-Key", "local-admin-api-key"))
                 .andExpect(status().isOk());
+    }
+
+    @Test
+    @DisplayName("스트리밍 채팅 API는 SSE chunk와 done 이벤트를 반환한다")
+    void streamsChatResponse() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/ai/chat/stream")
+                        .header("X-API-Key", "local-dev-api-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "userId": "user-001",
+                                  "provider": "mock",
+                                  "prompt": "이번 주 수리 현황을 요약해줘"
+                                }
+                                """))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        mockMvc.perform(asyncDispatch(result))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("event:chunk")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("event:done")));
     }
 }

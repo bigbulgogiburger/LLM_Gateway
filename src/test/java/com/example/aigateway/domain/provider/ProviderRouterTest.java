@@ -21,6 +21,8 @@ class ProviderRouterTest {
     void routesKnownProvider() {
         assertThat(providerRouter.route("mock")).isInstanceOf(MockLlmProvider.class);
         assertThat(providerRouter.route("openai")).isInstanceOf(OpenAiLlmProvider.class);
+        assertThat(providerRouter.route("mock").capabilities().supportsStructuredOutputs()).isTrue();
+        assertThat(providerRouter.route("openai").capabilities().supportsMessages()).isTrue();
     }
 
     @Test

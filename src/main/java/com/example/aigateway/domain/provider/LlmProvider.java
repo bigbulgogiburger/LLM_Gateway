@@ -5,5 +5,7 @@ import com.example.aigateway.application.dto.AiGatewayCommand;
 public interface LlmProvider {
     String name();
 
+    ProviderCapabilities capabilities();
+
     String generate(AiGatewayCommand command);
 }

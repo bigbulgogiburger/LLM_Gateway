@@ -134,6 +134,16 @@ class AdminControllerTest {
     }
 
     @Test
+    @DisplayName("관리자는 provider capability 목록을 조회할 수 있다")
+    void listsProviderCapabilities() throws Exception {
+        mockMvc.perform(get("/api/admin/providers")
+                        .header("X-API-Key", "local-admin-api-key"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[?(@.provider=='mock')].supportsStructuredOutputs").value(org.hamcrest.Matchers.hasItem(true)))
+                .andExpect(jsonPath("$[?(@.provider=='openai')].supportsMessages").value(org.hamcrest.Matchers.hasItem(true)));
+    }
+
+    @Test
     @DisplayName("관리자는 허용되지 않은 tenant 정책에 접근할 수 없다")
     void rejectsUnauthorizedTenantAccess() throws Exception {
         mockMvc.perform(get("/api/admin/tenants/tenant-denied/policy")

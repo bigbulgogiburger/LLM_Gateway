@@ -2,6 +2,7 @@ package com.example.aigateway.infrastructure.provider;
 
 import com.example.aigateway.application.dto.AiGatewayCommand;
 import com.example.aigateway.domain.provider.LlmProvider;
+import com.example.aigateway.domain.provider.ProviderCapabilities;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
@@ -11,6 +12,11 @@ public class MockLlmProvider implements LlmProvider {
     @Override
     public String name() {
         return "mock";
+    }
+
+    @Override
+    public ProviderCapabilities capabilities() {
+        return new ProviderCapabilities(true, true, true, false, false);
     }
 
     @Override
