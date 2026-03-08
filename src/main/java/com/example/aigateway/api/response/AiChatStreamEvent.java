@@ -5,6 +5,7 @@ public record AiChatStreamEvent(
         String requestId,
         String provider,
         String status,
-        String content
+        String content,
+        ToolCallView toolCall
 ) {
 }

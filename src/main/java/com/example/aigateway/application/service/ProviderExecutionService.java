@@ -31,8 +31,8 @@ public class ProviderExecutionService {
                 .build());
     }
 
-    public String execute(Callable<String> providerCall) {
-        Callable<String> decorated = CircuitBreaker.decorateCallable(circuitBreaker, providerCall);
+    public <T> T execute(Callable<T> providerCall) {
+        Callable<T> decorated = CircuitBreaker.decorateCallable(circuitBreaker, providerCall);
         decorated = Retry.decorateCallable(retry, decorated);
         try {
             return decorated.call();

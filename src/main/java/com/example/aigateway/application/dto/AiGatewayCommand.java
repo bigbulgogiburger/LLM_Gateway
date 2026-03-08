@@ -12,7 +12,10 @@ public record AiGatewayCommand(
         String provider,
         String prompt,
         List<Message> messages,
-        ResponseFormat responseFormat
+        ResponseFormat responseFormat,
+        boolean stream,
+        List<ToolDefinition> tools,
+        ToolChoice toolChoice
 ) {
 
     public AiGatewayCommand(
@@ -27,9 +30,29 @@ public record AiGatewayCommand(
         this(requestId, tenantId, clientId, userId, role, provider, prompt, List.of(), null);
     }
 
+    public AiGatewayCommand(
+            String requestId,
+            String tenantId,
+            String clientId,
+            String userId,
+            String role,
+            String provider,
+            String prompt,
+            List<Message> messages,
+            ResponseFormat responseFormat
+    ) {
+        this(requestId, tenantId, clientId, userId, role, provider, prompt, messages, responseFormat, false, List.of(), null);
+    }
+
     public record Message(String role, String content) {
     }
 
     public record ResponseFormat(String type, String schemaName, Boolean strict, JsonNode schema) {
+    }
+
+    public record ToolDefinition(String type, String name, String description, JsonNode inputSchema) {
+    }
+
+    public record ToolChoice(String type, String name) {
     }
 }

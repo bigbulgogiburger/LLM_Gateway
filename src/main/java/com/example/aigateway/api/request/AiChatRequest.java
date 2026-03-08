@@ -12,11 +12,14 @@ public record AiChatRequest(
         @NotBlank String provider,
         String prompt,
         @Valid List<Message> messages,
-        @Valid ResponseFormat responseFormat
+        @Valid ResponseFormat responseFormat,
+        Boolean stream,
+        @Valid List<ToolDefinition> tools,
+        @Valid ToolChoice toolChoice
 ) {
 
     public AiChatRequest(String userId, String role, String provider, String prompt) {
-        this(userId, role, provider, prompt, null, null);
+        this(userId, role, provider, prompt, null, null, false, null, null);
     }
 
     @AssertTrue(message = "prompt 또는 messages 중 하나는 필요합니다.")
@@ -39,6 +42,20 @@ public record AiChatRequest(
             String schemaName,
             Boolean strict,
             JsonNode schema
+    ) {
+    }
+
+    public record ToolDefinition(
+            @NotBlank String type,
+            @NotBlank String name,
+            String description,
+            JsonNode inputSchema
+    ) {
+    }
+
+    public record ToolChoice(
+            @NotBlank String type,
+            String name
     ) {
     }
 }

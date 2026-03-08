@@ -3,6 +3,7 @@ package com.example.aigateway.domain.provider;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
+import com.example.aigateway.application.dto.ProviderResult;
 import com.example.aigateway.infrastructure.provider.MockLlmProvider;
 import com.example.aigateway.infrastructure.provider.OpenAiLlmProvider;
 import java.util.List;
@@ -13,7 +14,17 @@ class ProviderRouterTest {
 
     private final ProviderRouter providerRouter = new ProviderRouter(List.of(
             new MockLlmProvider(),
-            new OpenAiLlmProvider(command -> "ok")
+            new OpenAiLlmProvider(new com.example.aigateway.infrastructure.provider.OpenAiApiClient() {
+                @Override
+                public ProviderResult generate(com.example.aigateway.application.dto.AiGatewayCommand command) {
+                    return ProviderResult.text("ok");
+                }
+
+                @Override
+                public void stream(com.example.aigateway.application.dto.AiGatewayCommand command, java.util.function.Consumer<com.example.aigateway.application.dto.ProviderStreamEvent> eventConsumer) {
+                    eventConsumer.accept(com.example.aigateway.application.dto.ProviderStreamEvent.done("resp-1"));
+                }
+            })
     ));
 
     @Test

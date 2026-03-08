@@ -10,9 +10,13 @@ import com.example.aigateway.api.response.GuardrailView;
 import com.example.aigateway.api.response.ModerationView;
 import com.example.aigateway.api.response.OutputGuardrailView;
 import com.example.aigateway.api.response.RuleResultView;
+import com.example.aigateway.api.response.ToolCallView;
 import com.example.aigateway.application.dto.AiGatewayCommand;
 import com.example.aigateway.application.dto.AiGuardrailAssessment;
 import com.example.aigateway.application.dto.ModerationAssessment;
+import com.example.aigateway.application.dto.ProviderResult;
+import com.example.aigateway.application.dto.ProviderStreamEvent;
+import com.example.aigateway.application.dto.ProviderToolCall;
 import com.example.aigateway.common.RequestIdGenerator;
 import com.example.aigateway.common.exception.GatewayErrorCodes;
 import com.example.aigateway.common.exception.GatewayException;
@@ -35,6 +39,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -100,7 +105,10 @@ public class AiGatewayService {
                 request.provider(),
                 inputText,
                 toMessages(request.messages()),
-                toResponseFormat(request.responseFormat())
+                toResponseFormat(request.responseFormat()),
+                Boolean.TRUE.equals(request.stream()),
+                toTools(request.tools()),
+                toToolChoice(request.toolChoice())
         );
 
         GuardrailDecision ruleDecision = ruleGuardrailService.evaluate(command);
@@ -144,7 +152,8 @@ public class AiGatewayService {
             return response;
         }
 
-        String content = providerExecutionService.execute(() -> provider.generate(command));
+        ProviderResult providerResult = providerExecutionService.execute(() -> provider.generate(command));
+        String content = providerResult.content() == null ? "" : providerResult.content();
         ModerationAssessment outputModeration = moderationService.assessOutput(content, command);
         if (outputModeration.blocks()) {
             GuardrailDecision blockedDecision = GuardrailDecision.blocked(List.of(new RuleResult(
@@ -203,7 +212,7 @@ public class AiGatewayService {
                         toModerationView(outputModeration),
                         toOutputView(outputDecision)
                 ),
-                new AiChatData(outputDecision.content())
+                new AiChatData(outputDecision.content(), toToolCallViews(providerResult.toolCalls()))
         );
         auditLogService.log(toAuditEvent(command, response, elapsedMillis));
         gatewayMetricsService.recordOutcome(provider.name(), "success", command.tenantId());
@@ -221,9 +230,8 @@ public class AiGatewayService {
             );
         }
 
-        AiChatResponse response = process(request, principal);
         SseEmitter emitter = new SseEmitter(30_000L);
-        CompletableFuture.runAsync(() -> emitStream(emitter, response));
+        CompletableFuture.runAsync(() -> streamWithProvider(emitter, request, principal, provider));
         return emitter;
     }
 
@@ -319,58 +327,251 @@ public class AiGatewayService {
         return sanitized.substring(0, 40) + "...";
     }
 
-    private void emitStream(SseEmitter emitter, AiChatResponse response) {
+    private void streamWithProvider(SseEmitter emitter, AiChatRequest request, GatewayPrincipal principal, LlmProvider provider) {
         try {
-            if (!"SUCCESS".equals(response.status()) || response.data() == null) {
-                emitter.send(SseEmitter.event()
-                        .name("blocked")
-                        .data(new AiChatStreamEvent(
-                                "blocked",
-                                response.requestId(),
-                                response.provider(),
-                                response.status(),
-                                null
-                        )));
-                emitter.complete();
+            Instant startedAt = Instant.now();
+            if (!principal.allowsProvider(request.provider())) {
+                throw new GatewayException(
+                        GatewayErrorCodes.PROVIDER_NOT_ALLOWED,
+                        HttpStatus.FORBIDDEN,
+                        "현재 API Key로는 요청한 provider를 사용할 수 없습니다."
+                );
+            }
+
+            String inputText = resolveInputText(request);
+            quotaEnforcementService.checkAndConsumeRequest(principal, inputText);
+            validateProviderCapabilities(provider, request);
+
+            AiGatewayCommand command = new AiGatewayCommand(
+                    requestIdGenerator.generate(),
+                    principal.tenantId(),
+                    principal.clientId(),
+                    request.userId(),
+                    principal.role(),
+                    request.provider(),
+                    inputText,
+                    toMessages(request.messages()),
+                    toResponseFormat(request.responseFormat()),
+                    Boolean.TRUE.equals(request.stream()),
+                    toTools(request.tools()),
+                    toToolChoice(request.toolChoice())
+            );
+
+            GuardrailDecision ruleDecision = ruleGuardrailService.evaluate(command);
+            if (ruleDecision.isBlocked()) {
+                emitBlockedAndComplete(emitter, buildBlockedResponse(command, request.provider(), ruleDecision, null, null, null, null));
                 return;
             }
 
-            for (String chunk : chunkContent(response.data().content(), 48)) {
-                emitter.send(SseEmitter.event()
-                        .name("chunk")
-                        .data(new AiChatStreamEvent(
-                                "chunk",
-                                response.requestId(),
-                                response.provider(),
-                                response.status(),
-                                chunk
-                        )));
+            ModerationAssessment inputModeration = moderationService.assessInput(command);
+            if (inputModeration.blocks()) {
+                GuardrailDecision blockedDecision = GuardrailDecision.blocked(List.of(new RuleResult(
+                        GuardrailResultCode.INPUT_MODERATION_BLOCKED.name(),
+                        inputModeration.reason(),
+                        inputModeration.verdict().name()
+                )));
+                emitBlockedAndComplete(emitter, buildBlockedResponse(command, request.provider(), blockedDecision, inputModeration, null, null, null));
+                return;
             }
-            emitter.send(SseEmitter.event()
-                    .name("done")
-                    .data(new AiChatStreamEvent(
-                            "done",
-                            response.requestId(),
-                            response.provider(),
-                            response.status(),
+
+            AiGuardrailAssessment aiAssessment = aiGuardrailService.assess(command);
+            if (aiAssessment.blocksRequest()) {
+                RuleResult aiRuleResult = new RuleResult(
+                        GuardrailResultCode.AI_GUARDRAIL_BLOCKED.name(),
+                        aiAssessment.reason(),
+                        aiAssessment.verdict() == AiGuardrailVerdict.REVIEW ? "REVIEW" : "BLOCK"
+                );
+                emitBlockedAndComplete(
+                        emitter,
+                        buildBlockedResponse(command, request.provider(), GuardrailDecision.blocked(List.of(aiRuleResult)), inputModeration, aiAssessment, null, null)
+                );
+                return;
+            }
+
+            StringBuilder rawContent = new StringBuilder();
+            StringBuilder emittedContent = new StringBuilder();
+            List<ProviderToolCall> toolCalls = new ArrayList<>();
+            AtomicBoolean blocked = new AtomicBoolean(false);
+
+            provider.stream(command, event -> handleProviderStreamEvent(
+                    emitter,
+                    event,
+                    command,
+                    provider,
+                    principal,
+                    startedAt,
+                    ruleDecision,
+                    inputModeration,
+                    aiAssessment,
+                    rawContent,
+                    emittedContent,
+                    toolCalls,
+                    blocked
+            ));
+
+            if (blocked.get()) {
+                return;
+            }
+
+            quotaEnforcementService.recordResponseUsage(principal, emittedContent.toString());
+            long elapsedMillis = Duration.between(startedAt, Instant.now()).toMillis();
+            AiChatResponse successResponse = new AiChatResponse(
+                    "SUCCESS",
+                    command.requestId(),
+                    command.tenantId(),
+                    command.clientId(),
+                    provider.name(),
+                    new GuardrailView(
+                            true,
+                            ruleDecision.results().stream().map(this::toView).toList(),
+                            toModerationView(inputModeration),
+                            toAiView(aiAssessment),
+                            null,
                             null
-                    )));
+                    ),
+                    new AiChatData(emittedContent.toString(), toToolCallViews(toolCalls))
+            );
+            auditLogService.log(toAuditEvent(command, successResponse, elapsedMillis));
+            gatewayMetricsService.recordOutcome(provider.name(), "success_stream", command.tenantId());
+            gatewayMetricsService.recordLatency(provider.name(), "success_stream", command.tenantId(), elapsedMillis);
             emitter.complete();
         } catch (Exception exception) {
             emitter.completeWithError(exception);
         }
     }
 
-    private List<String> chunkContent(String content, int chunkSize) {
-        List<String> chunks = new ArrayList<>();
-        if (content == null || content.isBlank()) {
-            return chunks;
+    private void handleProviderStreamEvent(
+            SseEmitter emitter,
+            ProviderStreamEvent event,
+            AiGatewayCommand command,
+            LlmProvider provider,
+            GatewayPrincipal principal,
+            Instant startedAt,
+            GuardrailDecision ruleDecision,
+            ModerationAssessment inputModeration,
+            AiGuardrailAssessment aiAssessment,
+            StringBuilder rawContent,
+            StringBuilder emittedContent,
+            List<ProviderToolCall> toolCalls,
+            AtomicBoolean blocked
+    ) {
+        try {
+            if ("tool_call".equals(event.type()) && event.toolCall() != null) {
+                toolCalls.add(event.toolCall());
+                emitter.send(SseEmitter.event()
+                        .name("tool_call")
+                        .data(new AiChatStreamEvent(
+                                "tool_call",
+                                command.requestId(),
+                                provider.name(),
+                                "SUCCESS",
+                                null,
+                                toToolCallView(event.toolCall())
+                        )));
+                return;
+            }
+            if ("text_delta".equals(event.type()) && event.delta() != null) {
+                rawContent.append(event.delta());
+                ModerationAssessment outputModeration = moderationService.assessOutput(rawContent.toString(), command);
+                if (outputModeration.blocks()) {
+                    blocked.set(true);
+                    GuardrailDecision blockedDecision = GuardrailDecision.blocked(List.of(new RuleResult(
+                            GuardrailResultCode.OUTPUT_MODERATION_BLOCKED.name(),
+                            outputModeration.reason(),
+                            outputModeration.verdict().name()
+                    )));
+                    emitBlockedAndComplete(emitter, buildBlockedResponse(
+                            command,
+                            provider.name(),
+                            blockedDecision,
+                            inputModeration,
+                            aiAssessment,
+                            outputModeration,
+                            null
+                    ));
+                    return;
+                }
+
+                OutputGuardrailDecision outputDecision = outputGuardrailService.evaluate(rawContent.toString(), command);
+                if (outputDecision.isBlocked()) {
+                    blocked.set(true);
+                    emitBlockedAndComplete(emitter, buildBlockedResponse(
+                            command,
+                            provider.name(),
+                            GuardrailDecision.passed(ruleDecision.results()),
+                            inputModeration,
+                            aiAssessment,
+                            outputModeration,
+                            outputDecision
+                    ));
+                    return;
+                }
+
+                String safeContent = outputDecision.content();
+                String deltaToEmit = deriveStreamDelta(emittedContent.toString(), safeContent);
+                emittedContent.setLength(0);
+                emittedContent.append(safeContent);
+                if (!deltaToEmit.isEmpty()) {
+                    emitter.send(SseEmitter.event()
+                            .name("chunk")
+                            .data(new AiChatStreamEvent(
+                                    "chunk",
+                                    command.requestId(),
+                                    provider.name(),
+                                    "SUCCESS",
+                                    deltaToEmit,
+                                    null
+                            )));
+                }
+                return;
+            }
+            if ("done".equals(event.type())) {
+                emitter.send(SseEmitter.event()
+                        .name("done")
+                        .data(new AiChatStreamEvent(
+                                "done",
+                                command.requestId(),
+                                provider.name(),
+                                "SUCCESS",
+                                null,
+                                null
+                        )));
+            }
+        } catch (Exception exception) {
+            blocked.set(true);
+            emitter.completeWithError(exception);
         }
-        for (int start = 0; start < content.length(); start += chunkSize) {
-            int end = Math.min(content.length(), start + chunkSize);
-            chunks.add(content.substring(start, end));
+    }
+
+    private String deriveStreamDelta(String previousContent, String currentContent) {
+        if (currentContent == null) {
+            return "";
         }
-        return chunks;
+        if (previousContent == null || previousContent.isEmpty()) {
+            return currentContent;
+        }
+        if (currentContent.startsWith(previousContent)) {
+            return currentContent.substring(previousContent.length());
+        }
+        return currentContent;
+    }
+
+    private void emitBlockedAndComplete(SseEmitter emitter, AiChatResponse response) {
+        try {
+            emitter.send(SseEmitter.event()
+                    .name("blocked")
+                    .data(new AiChatStreamEvent(
+                            "blocked",
+                            response.requestId(),
+                            response.provider(),
+                            response.status(),
+                            null,
+                            null
+                    )));
+            emitter.complete();
+        } catch (Exception exception) {
+            emitter.completeWithError(exception);
+        }
     }
 
     private void validateProviderCapabilities(LlmProvider provider, AiChatRequest request) {
@@ -386,6 +587,20 @@ public class AiGatewayService {
                     GatewayErrorCodes.PROVIDER_CAPABILITY_NOT_SUPPORTED,
                     HttpStatus.BAD_REQUEST,
                     "선택한 provider는 structured output을 지원하지 않습니다."
+            );
+        }
+        if (Boolean.TRUE.equals(request.stream()) && !provider.capabilities().supportsStreaming()) {
+            throw new GatewayException(
+                    GatewayErrorCodes.PROVIDER_CAPABILITY_NOT_SUPPORTED,
+                    HttpStatus.BAD_REQUEST,
+                    "선택한 provider는 streaming을 지원하지 않습니다."
+            );
+        }
+        if (request.tools() != null && !request.tools().isEmpty() && !provider.capabilities().supportsToolUse()) {
+            throw new GatewayException(
+                    GatewayErrorCodes.PROVIDER_CAPABILITY_NOT_SUPPORTED,
+                    HttpStatus.BAD_REQUEST,
+                    "선택한 provider는 tool use를 지원하지 않습니다."
             );
         }
     }
@@ -417,6 +632,43 @@ public class AiGatewayService {
                 responseFormat.schemaName(),
                 responseFormat.strict(),
                 responseFormat.schema()
+        );
+    }
+
+    private List<AiGatewayCommand.ToolDefinition> toTools(List<AiChatRequest.ToolDefinition> tools) {
+        if (tools == null || tools.isEmpty()) {
+            return List.of();
+        }
+        return tools.stream()
+                .map(tool -> new AiGatewayCommand.ToolDefinition(
+                        tool.type(),
+                        tool.name(),
+                        tool.description(),
+                        tool.inputSchema()
+                ))
+                .toList();
+    }
+
+    private AiGatewayCommand.ToolChoice toToolChoice(AiChatRequest.ToolChoice toolChoice) {
+        if (toolChoice == null) {
+            return null;
+        }
+        return new AiGatewayCommand.ToolChoice(toolChoice.type(), toolChoice.name());
+    }
+
+    private List<ToolCallView> toToolCallViews(List<ProviderToolCall> toolCalls) {
+        if (toolCalls == null || toolCalls.isEmpty()) {
+            return List.of();
+        }
+        return toolCalls.stream().map(this::toToolCallView).toList();
+    }
+
+    private ToolCallView toToolCallView(ProviderToolCall toolCall) {
+        return new ToolCallView(
+                toolCall.id(),
+                toolCall.callId(),
+                toolCall.name(),
+                toolCall.arguments()
         );
     }
 }

@@ -135,4 +135,79 @@ class AiChatControllerTest {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("event:chunk")))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("event:done")));
     }
+
+    @Test
+    @DisplayName("채팅 API는 tool call 메타데이터를 반환할 수 있다")
+    void returnsToolCallMetadata() throws Exception {
+        mockMvc.perform(post("/api/ai/chat")
+                        .header("X-API-Key", "local-dev-api-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "userId": "user-001",
+                                  "provider": "mock",
+                                  "prompt": "날씨를 확인해줘",
+                                  "tools": [
+                                    {
+                                      "type": "function",
+                                      "name": "lookup_weather",
+                                      "description": "현재 날씨를 조회한다",
+                                      "inputSchema": {
+                                        "type": "object",
+                                        "properties": {
+                                          "city": {"type": "string"}
+                                        },
+                                        "required": ["city"]
+                                      }
+                                    }
+                                  ],
+                                  "toolChoice": {
+                                    "type": "function",
+                                    "name": "lookup_weather"
+                                  }
+                                }
+                                """))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.toolCalls[0].name").value("lookup_weather"));
+    }
+
+    @Test
+    @DisplayName("스트리밍 채팅 API는 tool call 이벤트도 반환할 수 있다")
+    void streamsToolCallEvent() throws Exception {
+        MvcResult result = mockMvc.perform(post("/api/ai/chat/stream")
+                        .header("X-API-Key", "local-dev-api-key")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("""
+                                {
+                                  "userId": "user-001",
+                                  "provider": "mock",
+                                  "prompt": "날씨를 확인해줘",
+                                  "tools": [
+                                    {
+                                      "type": "function",
+                                      "name": "lookup_weather",
+                                      "description": "현재 날씨를 조회한다",
+                                      "inputSchema": {
+                                        "type": "object",
+                                        "properties": {
+                                          "city": {"type": "string"}
+                                        },
+                                        "required": ["city"]
+                                      }
+                                    }
+                                  ],
+                                  "toolChoice": {
+                                    "type": "function",
+                                    "name": "lookup_weather"
+                                  }
+                                }
+                                """))
+                .andExpect(request().asyncStarted())
+                .andReturn();
+
+        mockMvc.perform(asyncDispatch(result))
+                .andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("event:tool_call")))
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("lookup_weather")));
+    }
 }

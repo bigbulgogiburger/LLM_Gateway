@@ -2,6 +2,7 @@
 
 Spring Boot 3.x, Java 21, Gradle 기반의 AI Gateway MVP다. 요청은 Input Rule Guardrail과 AI Guardrail을 거친 뒤 허용된 경우에만 `mock` 또는 `openai` provider로 전달된다. 생성된 응답은 Output Guardrail을 다시 통과하며, 필요 시 민감정보를 마스킹하거나 출력을 차단한다.
 운영 보강으로 API key 인증, tenant-aware 정책, quota, persistent audit, metrics, provider resilience까지 포함한다.
+현재 OpenAI 연동은 `Responses API` 중심으로 구성되어 structured output, streaming, tool call 요청 모델을 함께 다룬다.
 
 ## 실행
 
@@ -103,13 +104,44 @@ curl -N -X POST http://localhost:8090/api/ai/chat/stream \
   }'
 ```
 
+tool call 요청 예시:
+
+```bash
+curl -X POST http://localhost:8090/api/ai/chat \
+  -H "X-API-Key: local-dev-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user-001",
+    "provider": "mock",
+    "prompt": "서울 날씨를 확인해줘",
+    "tools": [
+      {
+        "type": "function",
+        "name": "lookup_weather",
+        "description": "도시 기준 현재 날씨를 조회한다",
+        "inputSchema": {
+          "type": "object",
+          "properties": {
+            "city": {"type": "string"}
+          },
+          "required": ["city"]
+        }
+      }
+    ],
+    "toolChoice": {
+      "type": "function",
+      "name": "lookup_weather"
+    }
+  }'
+```
+
 ## 주요 구조
 
 - `Input Rule Guardrail`: 금지어, PII, 프롬프트 길이, 역할 정책
 - `Moderation Layer`: 입력/출력 고위험 패턴을 별도 계층에서 차단
 - `AI Guardrail`: YAML 정책 기반 위험 문구 판정
 - `Provider Router`: `mock`, `openai` 라우팅
-- `OpenAI Provider`: `.env` 또는 환경 변수의 `OPENAI_API_KEY`를 사용해 실제 OpenAI Chat Completions 호출
+- `OpenAI Provider`: `.env` 또는 환경 변수의 `OPENAI_API_KEY`를 사용해 실제 OpenAI Responses API 호출
 - `Output Guardrail`: 민감 키워드 차단, PII 마스킹
 - `API Key Security`: 클라이언트/테넌트/역할 매핑, provider 허용 범위 제어
 - `Rate Limit`: API key 단위 in-memory requests/minute 제한

@@ -94,6 +94,9 @@ class AiGatewayServiceTest {
                         new AiChatRequest.Message("assistant", "첫 답변"),
                         new AiChatRequest.Message("user", "최종 요약")
                 ),
+                null,
+                false,
+                null,
                 null
         ), PRINCIPAL);
 
@@ -118,12 +121,48 @@ class AiGatewayServiceTest {
                             "summary": {"type": "string"}
                           }
                         }
-                        """))
+                        """)),
+                false,
+                null,
+                null
         ), PRINCIPAL);
 
         assertThat(response.status()).isEqualTo("SUCCESS");
         assertThat(response.data().content()).startsWith("{");
         assertThat(response.data().content()).contains("\"provider\":\"mock\"");
+    }
+
+    @Test
+    @DisplayName("tool 요청이 있으면 provider tool call 메타데이터를 반환한다")
+    void returnsToolCallMetadata() throws Exception {
+        AiChatResponse response = aiGatewayService.process(new AiChatRequest(
+                "user-001",
+                null,
+                "mock",
+                "날씨를 확인해줘",
+                null,
+                null,
+                false,
+                List.of(new AiChatRequest.ToolDefinition(
+                        "function",
+                        "lookup_weather",
+                        "현재 날씨를 조회한다",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "city": {"type": "string"}
+                                  },
+                                  "required": ["city"]
+                                }
+                                """)
+                )),
+                new AiChatRequest.ToolChoice("function", "lookup_weather")
+        ), PRINCIPAL);
+
+        assertThat(response.status()).isEqualTo("SUCCESS");
+        assertThat(response.data().toolCalls()).hasSize(1);
+        assertThat(response.data().toolCalls().get(0).name()).isEqualTo("lookup_weather");
     }
 
     @Test
