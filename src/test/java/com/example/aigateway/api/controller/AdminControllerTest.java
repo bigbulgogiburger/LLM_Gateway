@@ -284,14 +284,89 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$.blockedCount").value(1))
                 .andExpect(jsonPath("$.totalTokens").value(200))
                 .andExpect(jsonPath("$.totalCostUsd").value(0.004d))
+                .andExpect(jsonPath("$.averageTokensPerRequest").value(100.0d))
+                .andExpect(jsonPath("$.averageCostUsdPerRequest").value(0.002d))
                 .andExpect(jsonPath("$.breakdown[0].provider").value("openai"))
                 .andExpect(jsonPath("$.breakdown[0].model").value("gpt-4.1-mini"))
+                .andExpect(jsonPath("$.providerBreakdown[0].key").value("openai"))
+                .andExpect(jsonPath("$.providerBreakdown[0].requests").value(2))
+                .andExpect(jsonPath("$.modelBreakdown[0].key").value("gpt-4.1-mini"))
+                .andExpect(jsonPath("$.toolBreakdown[0].key").value("lookup_weather"))
+                .andExpect(jsonPath("$.toolBreakdown[0].requests").value(2))
                 .andExpect(jsonPath("$.timeSeries.length()").value(2))
                 .andExpect(jsonPath("$.timeSeries[0].requests").value(1))
                 .andExpect(jsonPath("$.timeSeries[0].totalTokens").value(150))
                 .andExpect(jsonPath("$.timeSeries[1].requests").value(1))
                 .andExpect(jsonPath("$.timeSeries[1].blockedCount").value(1))
                 .andExpect(jsonPath("$.timeSeries[1].totalTokens").value(50));
+    }
+
+    @Test
+    @DisplayName("usage metrics는 48시간을 넘기면 일 단위 bucket으로 집계한다")
+    void getsDailyUsageMetricsBuckets() throws Exception {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.HOURS);
+        auditLogRepository.save(new AuditLogEntity(
+                "req-metrics-daily-1",
+                "tenant-default",
+                "local-operator",
+                "user-101",
+                "OPERATOR",
+                "mock",
+                "mock-gateway",
+                "SUCCESS",
+                true,
+                "SAFE",
+                true,
+                false,
+                "",
+                1,
+                "lookup_time",
+                20,
+                10,
+                30,
+                0.0d,
+                30,
+                "day-1",
+                now.minus(26, ChronoUnit.HOURS)
+        ));
+        auditLogRepository.save(new AuditLogEntity(
+                "req-metrics-daily-2",
+                "tenant-default",
+                "local-operator",
+                "user-102",
+                "OPERATOR",
+                "mock",
+                "mock-gateway",
+                "SUCCESS",
+                true,
+                "SAFE",
+                true,
+                false,
+                "",
+                1,
+                "lookup_weather",
+                30,
+                20,
+                50,
+                0.0d,
+                30,
+                "day-2",
+                now.minus(4, ChronoUnit.HOURS)
+        ));
+
+        mockMvc.perform(get("/api/admin/metrics/usage")
+                        .header("X-API-Key", "local-admin-api-key")
+                        .queryParam("provider", "mock")
+                        .queryParam("sinceHours", "72"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.bucketUnit").value("day"))
+                .andExpect(jsonPath("$.totalRequests").value(2))
+                .andExpect(jsonPath("$.providerBreakdown[0].key").value("mock"))
+                .andExpect(jsonPath("$.modelBreakdown[0].key").value("mock-gateway"))
+                .andExpect(jsonPath("$.toolBreakdown.length()").value(2))
+                .andExpect(jsonPath("$.timeSeries.length()").value(2))
+                .andExpect(jsonPath("$.timeSeries[0].requests").value(1))
+                .andExpect(jsonPath("$.timeSeries[1].requests").value(1));
     }
 
     @Test

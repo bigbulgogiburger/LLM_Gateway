@@ -14,7 +14,12 @@ public record AdminUsageMetricsItem(
         long totalOutputTokens,
         long totalTokens,
         double totalCostUsd,
+        double averageTokensPerRequest,
+        double averageCostUsdPerRequest,
         List<ProviderUsageBreakdownItem> breakdown,
+        List<DimensionBreakdownItem> providerBreakdown,
+        List<DimensionBreakdownItem> modelBreakdown,
+        List<DimensionBreakdownItem> toolBreakdown,
         List<UsageTimeSeriesBucketItem> timeSeries
 ) {
     public record ProviderUsageBreakdownItem(
@@ -28,6 +33,16 @@ public record AdminUsageMetricsItem(
 
     public record UsageTimeSeriesBucketItem(
             String bucketStart,
+            long requests,
+            long successCount,
+            long blockedCount,
+            long totalTokens,
+            double totalCostUsd
+    ) {
+    }
+
+    public record DimensionBreakdownItem(
+            String key,
             long requests,
             long successCount,
             long blockedCount,

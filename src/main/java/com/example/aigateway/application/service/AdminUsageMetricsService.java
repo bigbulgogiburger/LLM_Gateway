@@ -39,6 +39,8 @@ public class AdminUsageMetricsService {
         long totalOutputTokens = filtered.stream().map(AuditLogEntity::getOutputTokens).filter(Objects::nonNull).mapToLong(Integer::longValue).sum();
         long totalTokens = filtered.stream().map(AuditLogEntity::getTotalTokens).filter(Objects::nonNull).mapToLong(Integer::longValue).sum();
         double totalCostUsd = filtered.stream().map(AuditLogEntity::getCostUsd).filter(Objects::nonNull).mapToDouble(Double::doubleValue).sum();
+        double averageTokensPerRequest = filtered.isEmpty() ? 0.0d : (double) totalTokens / filtered.size();
+        double averageCostUsdPerRequest = filtered.isEmpty() ? 0.0d : totalCostUsd / filtered.size();
 
         List<AdminUsageMetricsItem.ProviderUsageBreakdownItem> breakdown = filtered.stream()
                 .collect(Collectors.groupingBy(entity -> safeLower(entity.getProvider()) + "|" + safeLower(entity.getModel())))
@@ -88,6 +90,39 @@ public class AdminUsageMetricsService {
                 .sorted(Comparator.comparing(AdminUsageMetricsItem.UsageTimeSeriesBucketItem::bucketStart))
                 .toList();
 
+        List<AdminUsageMetricsItem.DimensionBreakdownItem> providerBreakdown = buildDimensionBreakdown(
+                filtered,
+                AuditLogEntity::getProvider
+        );
+        List<AdminUsageMetricsItem.DimensionBreakdownItem> modelBreakdown = buildDimensionBreakdown(
+                filtered,
+                entity -> entity.getModel() == null ? "unknown" : entity.getModel()
+        );
+        List<AdminUsageMetricsItem.DimensionBreakdownItem> toolBreakdown = filtered.stream()
+                .flatMap(entity -> extractTools(entity.getToolNames()).stream()
+                        .map(toolName -> new ToolMetricSource(
+                                toolName,
+                                entity.getStatus(),
+                                entity.getTotalTokens(),
+                                entity.getCostUsd()
+                        )))
+                .collect(Collectors.groupingBy(ToolMetricSource::toolName))
+                .entrySet().stream()
+                .map(entry -> {
+                    List<ToolMetricSource> items = entry.getValue();
+                    return new AdminUsageMetricsItem.DimensionBreakdownItem(
+                            entry.getKey(),
+                            items.size(),
+                            items.stream().filter(item -> "SUCCESS".equalsIgnoreCase(item.status())).count(),
+                            items.stream().filter(item -> "BLOCKED".equalsIgnoreCase(item.status())).count(),
+                            items.stream().map(ToolMetricSource::totalTokens).filter(Objects::nonNull).mapToLong(Integer::longValue).sum(),
+                            items.stream().map(ToolMetricSource::costUsd).filter(Objects::nonNull).mapToDouble(Double::doubleValue).sum()
+                    );
+                })
+                .sorted(Comparator.comparingLong(AdminUsageMetricsItem.DimensionBreakdownItem::requests).reversed()
+                        .thenComparing(AdminUsageMetricsItem.DimensionBreakdownItem::key))
+                .toList();
+
         return new AdminUsageMetricsItem(
                 tenantId,
                 effectiveSinceHours,
@@ -100,7 +135,12 @@ public class AdminUsageMetricsService {
                 totalOutputTokens,
                 totalTokens,
                 totalCostUsd,
+                averageTokensPerRequest,
+                averageCostUsdPerRequest,
                 breakdown,
+                providerBreakdown,
+                modelBreakdown,
+                toolBreakdown,
                 timeSeries
         );
     }
@@ -110,12 +150,18 @@ public class AdminUsageMetricsService {
     }
 
     private boolean containsTool(String toolNames, String tool) {
+        return extractTools(toolNames).stream()
+                .anyMatch(value -> value.equalsIgnoreCase(tool));
+    }
+
+    private List<String> extractTools(String toolNames) {
         if (toolNames == null || toolNames.isBlank()) {
-            return false;
+            return List.of();
         }
         return List.of(toolNames.split(",")).stream()
                 .map(String::trim)
-                .anyMatch(value -> value.equalsIgnoreCase(tool));
+                .filter(value -> !value.isBlank())
+                .toList();
     }
 
     private Instant bucketStart(Instant createdAt, String bucketUnit) {
@@ -124,5 +170,40 @@ public class AdminUsageMetricsService {
             return date.atStartOfDay().toInstant(ZoneOffset.UTC);
         }
         return createdAt.truncatedTo(ChronoUnit.HOURS);
+    }
+
+    private List<AdminUsageMetricsItem.DimensionBreakdownItem> buildDimensionBreakdown(
+            List<AuditLogEntity> filtered,
+            java.util.function.Function<AuditLogEntity, String> keyExtractor
+    ) {
+        return filtered.stream()
+                .collect(Collectors.groupingBy(entity -> safeDimensionKey(keyExtractor.apply(entity))))
+                .entrySet().stream()
+                .map(entry -> {
+                    List<AuditLogEntity> items = entry.getValue();
+                    return new AdminUsageMetricsItem.DimensionBreakdownItem(
+                            entry.getKey(),
+                            items.size(),
+                            items.stream().filter(entity -> "SUCCESS".equalsIgnoreCase(entity.getStatus())).count(),
+                            items.stream().filter(entity -> "BLOCKED".equalsIgnoreCase(entity.getStatus())).count(),
+                            items.stream().map(AuditLogEntity::getTotalTokens).filter(Objects::nonNull).mapToLong(Integer::longValue).sum(),
+                            items.stream().map(AuditLogEntity::getCostUsd).filter(Objects::nonNull).mapToDouble(Double::doubleValue).sum()
+                    );
+                })
+                .sorted(Comparator.comparingLong(AdminUsageMetricsItem.DimensionBreakdownItem::requests).reversed()
+                        .thenComparing(AdminUsageMetricsItem.DimensionBreakdownItem::key))
+                .toList();
+    }
+
+    private String safeDimensionKey(String value) {
+        return value == null || value.isBlank() ? "unknown" : value;
+    }
+
+    private record ToolMetricSource(
+            String toolName,
+            String status,
+            Integer totalTokens,
+            Double costUsd
+    ) {
     }
 }
