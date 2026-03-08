@@ -135,7 +135,9 @@ class DockerComposeGatewayIntegrationTest {
                 2,
                 1,
                 10,
-                List.of("mock")
+                List.of("mock"),
+                List.of(),
+                null
         );
 
         RateLimitResult first = clientRateLimiter.consume(client);

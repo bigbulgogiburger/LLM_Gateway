@@ -9,7 +9,8 @@ public record GatewayPrincipal(
         String role,
         int dailyRequestQuota,
         int dailyTokenQuota,
-        List<String> allowedProviders
+        List<String> allowedProviders,
+        List<String> manageableTenants
 ) implements Principal {
 
     @Override
@@ -19,5 +20,18 @@ public record GatewayPrincipal(
 
     public boolean allowsProvider(String provider) {
         return allowedProviders.stream().anyMatch(allowed -> allowed.equalsIgnoreCase(provider));
+    }
+
+    public boolean canManageTenant(String requestedTenantId) {
+        if (requestedTenantId == null || requestedTenantId.isBlank()) {
+            return false;
+        }
+        if (tenantId.equalsIgnoreCase(requestedTenantId)) {
+            return true;
+        }
+        if (manageableTenants == null) {
+            return false;
+        }
+        return manageableTenants.stream().anyMatch(allowedTenant -> allowedTenant.equalsIgnoreCase(requestedTenantId));
     }
 }

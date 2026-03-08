@@ -10,6 +10,23 @@ spring:
     open-in-view: false
 
 gateway:
+  moderation:
+    input:
+      enabled: true
+      rules:
+        - category: self-harm
+          pattern: "자해 방법"
+          verdict: BLOCK
+          reason: "자해 유도성 요청은 허용되지 않습니다."
+          score: 0.99
+    output:
+      enabled: true
+      rules:
+        - category: credentials
+          pattern: "secret token"
+          verdict: BLOCK
+          reason: "민감 자격 증명 노출 가능성이 있습니다."
+          score: 0.98
   redis:
     enabled: false
     namespace: ai-gateway-test
@@ -19,7 +36,7 @@ gateway:
     clients:
       - client-id: local-operator
         tenant-id: tenant-default
-        api-key: local-dev-api-key
+        api-key-hash: 2bcd99491790f5324dd084241b713b576a92b12c497f3b553230d49cc72e15c2
         role: OPERATOR
         requests-per-minute: 60
         daily-request-quota: 1000
@@ -27,9 +44,10 @@ gateway:
         allowed-providers:
           - mock
           - openai
+        manageable-tenants: []
       - client-id: local-admin
         tenant-id: tenant-default
-        api-key: local-admin-api-key
+        api-key-hash: 343511f8de8d241b42f5bfd2f4969eec3bbdc57fbb3eb252a8e4b840572ec89c
         role: ADMIN
         requests-per-minute: 120
         daily-request-quota: 5000
@@ -37,6 +55,10 @@ gateway:
         allowed-providers:
           - mock
           - openai
+        manageable-tenants:
+          - tenant-default
+          - tenant-enterprise
+          - tenant-rollback
   guardrail:
     input:
       max-prompt-length: 500
@@ -105,3 +127,9 @@ gateway:
       max-completion-tokens: 400
       connect-timeout-millis: 3000
       read-timeout-millis: 15000
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus

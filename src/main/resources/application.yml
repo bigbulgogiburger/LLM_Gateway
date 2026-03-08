@@ -15,6 +15,28 @@ server:
   port: 8090
 
 gateway:
+  moderation:
+    input:
+      enabled: true
+      rules:
+        - category: self-harm
+          pattern: "자해 방법"
+          verdict: BLOCK
+          reason: "자해 유도성 요청은 허용되지 않습니다."
+          score: 0.99
+        - category: jailbreak
+          pattern: "보안 정책 무시"
+          verdict: REVIEW
+          reason: "정책 우회 시도가 의심됩니다."
+          score: 0.86
+    output:
+      enabled: true
+      rules:
+        - category: credentials
+          pattern: "secret token"
+          verdict: BLOCK
+          reason: "민감 자격 증명 노출 가능성이 있습니다."
+          score: 0.98
   redis:
     enabled: ${GATEWAY_REDIS_ENABLED:false}
     namespace: ai-gateway
@@ -25,6 +47,7 @@ gateway:
       - client-id: local-operator
         tenant-id: tenant-default
         api-key: ${GATEWAY_API_KEY:local-dev-api-key}
+        api-key-hash: ${GATEWAY_API_KEY_SHA256:}
         role: OPERATOR
         requests-per-minute: 60
         daily-request-quota: 1000
@@ -32,9 +55,11 @@ gateway:
         allowed-providers:
           - mock
           - openai
+        manageable-tenants: []
       - client-id: local-admin
         tenant-id: tenant-default
         api-key: ${GATEWAY_ADMIN_API_KEY:local-admin-api-key}
+        api-key-hash: ${GATEWAY_ADMIN_API_KEY_SHA256:}
         role: ADMIN
         requests-per-minute: 120
         daily-request-quota: 5000
@@ -42,6 +67,8 @@ gateway:
         allowed-providers:
           - mock
           - openai
+        manageable-tenants:
+          - tenant-default
   guardrail:
     input:
       max-prompt-length: 500

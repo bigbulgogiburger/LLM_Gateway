@@ -7,6 +7,7 @@ import org.springframework.context.annotation.Configuration;
 @EnableConfigurationProperties({
         GuardrailProperties.class,
         OpenAiProperties.class,
+        ModerationProperties.class,
         GatewaySecurityProperties.class,
         ProviderResilienceProperties.class,
         GatewayTenantPolicyProperties.class,

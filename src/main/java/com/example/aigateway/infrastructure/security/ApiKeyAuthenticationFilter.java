@@ -1,18 +1,15 @@
 package com.example.aigateway.infrastructure.security;
 
-import com.example.aigateway.common.GatewayRequestAttributes;
 import com.example.aigateway.common.exception.GatewayErrorCodes;
 import com.example.aigateway.domain.security.GatewayPrincipal;
 import com.example.aigateway.infrastructure.config.GatewaySecurityProperties;
-import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
-import java.time.Instant;
 import java.util.List;
-import org.springframework.http.MediaType;
+import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -24,16 +21,16 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
     private final ApiKeyClientRegistry clientRegistry;
     private final ClientRateLimiter clientRateLimiter;
-    private final ObjectMapper objectMapper;
+    private final SecurityErrorResponseWriter errorResponseWriter;
 
     public ApiKeyAuthenticationFilter(
             ApiKeyClientRegistry clientRegistry,
             ClientRateLimiter clientRateLimiter,
-            ObjectMapper objectMapper
+            SecurityErrorResponseWriter errorResponseWriter
     ) {
         this.clientRegistry = clientRegistry;
         this.clientRateLimiter = clientRateLimiter;
-        this.objectMapper = objectMapper;
+        this.errorResponseWriter = errorResponseWriter;
     }
 
     @Override
@@ -50,7 +47,7 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                 : clientRegistry.findByApiKey(apiKey).orElse(null);
 
         if (client == null) {
-            writeError(response, request, HttpServletResponse.SC_UNAUTHORIZED, GatewayErrorCodes.UNAUTHORIZED,
+            writeError(response, request, HttpStatus.UNAUTHORIZED, GatewayErrorCodes.UNAUTHORIZED,
                     "유효한 API Key가 필요합니다.");
             return;
         }
@@ -58,7 +55,7 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
         RateLimitResult result = clientRateLimiter.consume(client);
         if (!result.allowed()) {
             response.setHeader("Retry-After", String.valueOf(result.retryAfterSeconds()));
-            writeError(response, request, 429, GatewayErrorCodes.RATE_LIMITED, "요청 한도를 초과했습니다.");
+            writeError(response, request, HttpStatus.TOO_MANY_REQUESTS, GatewayErrorCodes.RATE_LIMITED, "요청 한도를 초과했습니다.");
             return;
         }
 
@@ -68,7 +65,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                 client.role(),
                 client.dailyRequestQuota(),
                 client.dailyTokenQuota(),
-                client.allowedProviders()
+                client.allowedProviders(),
+                client.manageableTenants()
         );
         UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                 principal,
@@ -81,31 +79,18 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return !request.getRequestURI().startsWith("/api/");
+        String requestUri = request.getRequestURI();
+        if (requestUri.startsWith("/api/")) {
+            return false;
+        }
+        if ("/actuator/health".equals(requestUri) || "/actuator/info".equals(requestUri)) {
+            return true;
+        }
+        return !requestUri.startsWith("/actuator/");
     }
 
-    private void writeError(HttpServletResponse response, HttpServletRequest request, int status, String code, String message)
+    private void writeError(HttpServletResponse response, HttpServletRequest request, HttpStatus status, String code, String message)
             throws IOException {
-        response.setStatus(status);
-        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-        response.setCharacterEncoding("UTF-8");
-        objectMapper.writeValue(response.getWriter(), new ErrorBody(
-                Instant.now(),
-                status,
-                code,
-                message,
-                (String) request.getAttribute(GatewayRequestAttributes.REQUEST_ID),
-                request.getRequestURI()
-        ));
-    }
-
-    private record ErrorBody(
-            Instant timestamp,
-            int status,
-            String code,
-            String message,
-            String requestId,
-            String path
-    ) {
+        errorResponseWriter.write(response, request, status, code, message);
     }
 }

@@ -17,7 +17,9 @@ public record GatewaySecurityProperties(
             int requestsPerMinute,
             int dailyRequestQuota,
             int dailyTokenQuota,
-            List<String> allowedProviders
+            List<String> allowedProviders,
+            List<String> manageableTenants,
+            String apiKeyHash
     ) {
     }
 }

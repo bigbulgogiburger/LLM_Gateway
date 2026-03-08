@@ -15,12 +15,16 @@ Spring Boot 3.x, Java 21, Gradle 기반의 AI Gateway MVP다. 요청은 Input Ru
 OPENAI_API_KEY=sk-...
 GATEWAY_API_KEY=local-dev-api-key
 GATEWAY_ADMIN_API_KEY=local-admin-api-key
+GATEWAY_API_KEY_SHA256=
+GATEWAY_ADMIN_API_KEY_SHA256=
 DATABASE_URL=jdbc:postgresql://localhost:5432/aigateway
 DATABASE_DRIVER_CLASS_NAME=org.postgresql.Driver
 DATABASE_USERNAME=aigateway
 DATABASE_PASSWORD=aigateway
 GATEWAY_REDIS_ENABLED=true
 ```
+
+운영 환경에서는 `GATEWAY_API_KEY` 대신 `GATEWAY_API_KEY_SHA256`, `GATEWAY_ADMIN_API_KEY_SHA256`에 SHA-256 hex 값을 넣는 구성을 권장한다. 로컬 개발 편의를 위해 평문 키도 아직 호환되지만, 해시 설정이 있으면 해시 값을 우선 사용한다.
 
 ## 테스트
 
@@ -42,9 +46,54 @@ curl -X POST http://localhost:8090/api/ai/chat \
   }'
 ```
 
+멀티턴 대화는 `prompt` 대신 `messages` 배열로도 보낼 수 있다.
+
+```bash
+curl -X POST http://localhost:8090/api/ai/chat \
+  -H "X-API-Key: local-dev-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user-001",
+    "provider": "mock",
+    "messages": [
+      {"role": "user", "content": "이번 주 수리 현황을 요약해줘"},
+      {"role": "assistant", "content": "지난주에는 12건이었습니다."},
+      {"role": "user", "content": "이번 주만 다시 정리해줘"}
+    ]
+  }'
+```
+
+구조화된 JSON 응답이 필요하면 `responseFormat`을 함께 보낼 수 있다.
+
+```bash
+curl -X POST http://localhost:8090/api/ai/chat \
+  -H "X-API-Key: local-dev-api-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "userId": "user-001",
+    "provider": "openai",
+    "prompt": "이번 주 수리 현황을 JSON으로 요약해줘",
+    "responseFormat": {
+      "type": "json_schema",
+      "schemaName": "weekly_summary",
+      "strict": true,
+      "schema": {
+        "type": "object",
+        "properties": {
+          "summary": {"type": "string"},
+          "riskLevel": {"type": "string"}
+        },
+        "required": ["summary", "riskLevel"],
+        "additionalProperties": false
+      }
+    }
+  }'
+```
+
 ## 주요 구조
 
 - `Input Rule Guardrail`: 금지어, PII, 프롬프트 길이, 역할 정책
+- `Moderation Layer`: 입력/출력 고위험 패턴을 별도 계층에서 차단
 - `AI Guardrail`: YAML 정책 기반 위험 문구 판정
 - `Provider Router`: `mock`, `openai` 라우팅
 - `OpenAI Provider`: `.env` 또는 환경 변수의 `OPENAI_API_KEY`를 사용해 실제 OpenAI Chat Completions 호출

@@ -132,4 +132,13 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$[0].requestId").value("req-admin-search-1"))
                 .andExpect(jsonPath("$[0].status").value("BLOCKED"));
     }
+
+    @Test
+    @DisplayName("관리자는 허용되지 않은 tenant 정책에 접근할 수 없다")
+    void rejectsUnauthorizedTenantAccess() throws Exception {
+        mockMvc.perform(get("/api/admin/tenants/tenant-denied/policy")
+                        .header("X-API-Key", "local-admin-api-key"))
+                .andExpect(status().isForbidden())
+                .andExpect(jsonPath("$.code").value("FORBIDDEN"));
+    }
 }

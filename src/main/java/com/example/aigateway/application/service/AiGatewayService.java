@@ -1,14 +1,17 @@
 package com.example.aigateway.application.service;
 
 import com.example.aigateway.api.request.AiChatRequest;
+import com.example.aigateway.api.request.AiChatRequest.Message;
 import com.example.aigateway.api.response.AiChatData;
 import com.example.aigateway.api.response.AiChatResponse;
 import com.example.aigateway.api.response.AiGuardrailView;
 import com.example.aigateway.api.response.GuardrailView;
+import com.example.aigateway.api.response.ModerationView;
 import com.example.aigateway.api.response.OutputGuardrailView;
 import com.example.aigateway.api.response.RuleResultView;
 import com.example.aigateway.application.dto.AiGatewayCommand;
 import com.example.aigateway.application.dto.AiGuardrailAssessment;
+import com.example.aigateway.application.dto.ModerationAssessment;
 import com.example.aigateway.common.RequestIdGenerator;
 import com.example.aigateway.common.exception.GatewayErrorCodes;
 import com.example.aigateway.common.exception.GatewayException;
@@ -20,6 +23,7 @@ import com.example.aigateway.domain.guardrail.result.GuardrailResultCode;
 import com.example.aigateway.domain.guardrail.result.OutputGuardrailDecision;
 import com.example.aigateway.domain.guardrail.result.RuleResult;
 import com.example.aigateway.domain.guardrail.service.AiGuardrailService;
+import com.example.aigateway.domain.guardrail.service.ModerationService;
 import com.example.aigateway.domain.guardrail.service.OutputGuardrailService;
 import com.example.aigateway.domain.guardrail.service.RuleGuardrailService;
 import com.example.aigateway.domain.provider.LlmProvider;
@@ -28,6 +32,7 @@ import com.example.aigateway.domain.security.GatewayPrincipal;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import java.util.stream.Collectors;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
@@ -36,6 +41,7 @@ public class AiGatewayService {
 
     private final RuleGuardrailService ruleGuardrailService;
     private final AiGuardrailService aiGuardrailService;
+    private final ModerationService moderationService;
     private final OutputGuardrailService outputGuardrailService;
     private final ProviderExecutionService providerExecutionService;
     private final QuotaEnforcementService quotaEnforcementService;
@@ -47,6 +53,7 @@ public class AiGatewayService {
     public AiGatewayService(
             RuleGuardrailService ruleGuardrailService,
             AiGuardrailService aiGuardrailService,
+            ModerationService moderationService,
             OutputGuardrailService outputGuardrailService,
             ProviderExecutionService providerExecutionService,
             QuotaEnforcementService quotaEnforcementService,
@@ -57,6 +64,7 @@ public class AiGatewayService {
     ) {
         this.ruleGuardrailService = ruleGuardrailService;
         this.aiGuardrailService = aiGuardrailService;
+        this.moderationService = moderationService;
         this.outputGuardrailService = outputGuardrailService;
         this.providerExecutionService = providerExecutionService;
         this.quotaEnforcementService = quotaEnforcementService;
@@ -75,7 +83,8 @@ public class AiGatewayService {
                     "현재 API Key로는 요청한 provider를 사용할 수 없습니다."
             );
         }
-        quotaEnforcementService.checkAndConsumeRequest(principal, request.prompt());
+        String inputText = resolveInputText(request);
+        quotaEnforcementService.checkAndConsumeRequest(principal, inputText);
         AiGatewayCommand command = new AiGatewayCommand(
                 requestIdGenerator.generate(),
                 principal.tenantId(),
@@ -83,16 +92,33 @@ public class AiGatewayService {
                 request.userId(),
                 principal.role(),
                 request.provider(),
-                request.prompt()
+                inputText,
+                toMessages(request.messages()),
+                toResponseFormat(request.responseFormat())
         );
 
         GuardrailDecision ruleDecision = ruleGuardrailService.evaluate(command);
         if (ruleDecision.isBlocked()) {
             long elapsedMillis = Duration.between(startedAt, Instant.now()).toMillis();
-            AiChatResponse response = buildBlockedResponse(command, request.provider(), ruleDecision, null, null);
+            AiChatResponse response = buildBlockedResponse(command, request.provider(), ruleDecision, null, null, null, null);
             auditLogService.log(toAuditEvent(command, response, elapsedMillis));
             gatewayMetricsService.recordOutcome(request.provider(), "blocked_rule", command.tenantId());
             gatewayMetricsService.recordLatency(request.provider(), "blocked_rule", command.tenantId(), elapsedMillis);
+            return response;
+        }
+
+        ModerationAssessment inputModeration = moderationService.assessInput(command);
+        if (inputModeration.blocks()) {
+            GuardrailDecision blockedDecision = GuardrailDecision.blocked(List.of(new RuleResult(
+                    GuardrailResultCode.INPUT_MODERATION_BLOCKED.name(),
+                    inputModeration.reason(),
+                    inputModeration.verdict().name()
+            )));
+            long elapsedMillis = Duration.between(startedAt, Instant.now()).toMillis();
+            AiChatResponse response = buildBlockedResponse(command, request.provider(), blockedDecision, inputModeration, null, null, null);
+            auditLogService.log(toAuditEvent(command, response, elapsedMillis));
+            gatewayMetricsService.recordOutcome(request.provider(), "blocked_input_moderation", command.tenantId());
+            gatewayMetricsService.recordLatency(request.provider(), "blocked_input_moderation", command.tenantId(), elapsedMillis);
             return response;
         }
 
@@ -105,7 +131,7 @@ public class AiGatewayService {
             );
             GuardrailDecision blockedDecision = GuardrailDecision.blocked(List.of(aiRuleResult));
             long elapsedMillis = Duration.between(startedAt, Instant.now()).toMillis();
-            AiChatResponse response = buildBlockedResponse(command, request.provider(), blockedDecision, aiAssessment, null);
+            AiChatResponse response = buildBlockedResponse(command, request.provider(), blockedDecision, inputModeration, aiAssessment, null, null);
             auditLogService.log(toAuditEvent(command, response, elapsedMillis));
             gatewayMetricsService.recordOutcome(request.provider(), "blocked_ai", command.tenantId());
             gatewayMetricsService.recordLatency(request.provider(), "blocked_ai", command.tenantId(), elapsedMillis);
@@ -114,6 +140,29 @@ public class AiGatewayService {
 
         LlmProvider provider = providerRouter.route(command.provider());
         String content = providerExecutionService.execute(() -> provider.generate(command));
+        ModerationAssessment outputModeration = moderationService.assessOutput(content, command);
+        if (outputModeration.blocks()) {
+            GuardrailDecision blockedDecision = GuardrailDecision.blocked(List.of(new RuleResult(
+                    GuardrailResultCode.OUTPUT_MODERATION_BLOCKED.name(),
+                    outputModeration.reason(),
+                    outputModeration.verdict().name()
+            )));
+            long elapsedMillis = Duration.between(startedAt, Instant.now()).toMillis();
+            AiChatResponse response = buildBlockedResponse(
+                    command,
+                    provider.name(),
+                    blockedDecision,
+                    inputModeration,
+                    aiAssessment,
+                    outputModeration,
+                    null
+            );
+            quotaEnforcementService.recordResponseUsage(principal, content);
+            auditLogService.log(toAuditEvent(command, response, elapsedMillis));
+            gatewayMetricsService.recordOutcome(provider.name(), "blocked_output_moderation", command.tenantId());
+            gatewayMetricsService.recordLatency(provider.name(), "blocked_output_moderation", command.tenantId(), elapsedMillis);
+            return response;
+        }
         OutputGuardrailDecision outputDecision = outputGuardrailService.evaluate(content, command);
         if (outputDecision.isBlocked()) {
             long elapsedMillis = Duration.between(startedAt, Instant.now()).toMillis();
@@ -121,7 +170,9 @@ public class AiGatewayService {
                     command,
                     provider.name(),
                     GuardrailDecision.passed(ruleDecision.results()),
+                    inputModeration,
                     aiAssessment,
+                    outputModeration,
                     outputDecision
             );
             quotaEnforcementService.recordResponseUsage(principal, content);
@@ -142,7 +193,9 @@ public class AiGatewayService {
                 new GuardrailView(
                         true,
                         ruleDecision.results().stream().map(this::toView).toList(),
+                        toModerationView(inputModeration),
                         toAiView(aiAssessment),
+                        toModerationView(outputModeration),
                         toOutputView(outputDecision)
                 ),
                 new AiChatData(outputDecision.content())
@@ -157,7 +210,9 @@ public class AiGatewayService {
             AiGatewayCommand command,
             String provider,
             GuardrailDecision decision,
+            ModerationAssessment inputModeration,
             AiGuardrailAssessment aiAssessment,
+            ModerationAssessment outputModeration,
             OutputGuardrailDecision outputDecision
     ) {
         return new AiChatResponse(
@@ -169,7 +224,9 @@ public class AiGatewayService {
                 new GuardrailView(
                         false,
                         decision.results().stream().map(this::toView).toList(),
+                        toModerationView(inputModeration),
                         toAiView(aiAssessment),
+                        toModerationView(outputModeration),
                         toOutputView(outputDecision)
                 ),
                 null
@@ -185,6 +242,19 @@ public class AiGatewayService {
             return null;
         }
         return new AiGuardrailView(assessment.verdict().name(), assessment.reason(), assessment.score());
+    }
+
+    private ModerationView toModerationView(ModerationAssessment assessment) {
+        if (assessment == null || assessment.isSafe()) {
+            return null;
+        }
+        return new ModerationView(
+                assessment.phase(),
+                assessment.category(),
+                assessment.verdict().name(),
+                assessment.reason(),
+                assessment.score()
+        );
     }
 
     private OutputGuardrailView toOutputView(OutputGuardrailDecision decision) {
@@ -226,5 +296,35 @@ public class AiGatewayService {
             return sanitized;
         }
         return sanitized.substring(0, 40) + "...";
+    }
+
+    private String resolveInputText(AiChatRequest request) {
+        if (request.prompt() != null && !request.prompt().isBlank()) {
+            return request.prompt();
+        }
+        return request.messages().stream()
+                .map(Message::content)
+                .collect(Collectors.joining("\n"));
+    }
+
+    private List<AiGatewayCommand.Message> toMessages(List<AiChatRequest.Message> messages) {
+        if (messages == null || messages.isEmpty()) {
+            return List.of();
+        }
+        return messages.stream()
+                .map(message -> new AiGatewayCommand.Message(message.role(), message.content()))
+                .toList();
+    }
+
+    private AiGatewayCommand.ResponseFormat toResponseFormat(AiChatRequest.ResponseFormat responseFormat) {
+        if (responseFormat == null) {
+            return null;
+        }
+        return new AiGatewayCommand.ResponseFormat(
+                responseFormat.type(),
+                responseFormat.schemaName(),
+                responseFormat.strict(),
+                responseFormat.schema()
+        );
     }
 }
