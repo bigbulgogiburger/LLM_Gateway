@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Gateway Security Hardening"
+  short_description: "Harden auth, policy, guardrails"
+  default_prompt: "Use $ai-gateway-security-hardening to harden security, policy, or guardrail behavior in this repository."

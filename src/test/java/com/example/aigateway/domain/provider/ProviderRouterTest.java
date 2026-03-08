@@ -17,12 +17,31 @@ class ProviderRouterTest {
             new OpenAiLlmProvider(new com.example.aigateway.infrastructure.provider.OpenAiApiClient() {
                 @Override
                 public ProviderResult generate(com.example.aigateway.application.dto.AiGatewayCommand command) {
-                    return ProviderResult.text("ok");
+                    return ProviderResult.text("ok", "resp-1");
+                }
+
+                @Override
+                public ProviderResult continueWithToolOutputs(
+                        com.example.aigateway.application.dto.AiGatewayCommand command,
+                        ProviderResult previousResult,
+                        java.util.List<com.example.aigateway.application.dto.ToolExecutionResult> toolResults
+                ) {
+                    return ProviderResult.text("ok-followup", "resp-2");
                 }
 
                 @Override
                 public void stream(com.example.aigateway.application.dto.AiGatewayCommand command, java.util.function.Consumer<com.example.aigateway.application.dto.ProviderStreamEvent> eventConsumer) {
                     eventConsumer.accept(com.example.aigateway.application.dto.ProviderStreamEvent.done("resp-1"));
+                }
+
+                @Override
+                public void streamWithToolOutputs(
+                        com.example.aigateway.application.dto.AiGatewayCommand command,
+                        ProviderResult previousResult,
+                        java.util.List<com.example.aigateway.application.dto.ToolExecutionResult> toolResults,
+                        java.util.function.Consumer<com.example.aigateway.application.dto.ProviderStreamEvent> eventConsumer
+                ) {
+                    eventConsumer.accept(com.example.aigateway.application.dto.ProviderStreamEvent.done("resp-2"));
                 }
             })
     ));

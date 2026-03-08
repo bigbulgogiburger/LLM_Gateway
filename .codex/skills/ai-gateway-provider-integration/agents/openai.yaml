@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Gateway Provider Integration"
+  short_description: "Extend provider and streaming paths"
+  default_prompt: "Use $ai-gateway-provider-integration to add or modify a model provider integration in this repository."

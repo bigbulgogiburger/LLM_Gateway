@@ -19,7 +19,8 @@ public record GatewaySecurityProperties(
             int dailyTokenQuota,
             List<String> allowedProviders,
             List<String> manageableTenants,
-            String apiKeyHash
+            String apiKeyHash,
+            List<String> allowedTools
     ) {
     }
 }

@@ -41,7 +41,8 @@ class RedisClientRateLimiterTest {
                 1000,
                 List.of("mock"),
                 List.of(),
-                null
+                null,
+                List.of("lookup_weather")
         ));
 
         assertThat(result.allowed()).isFalse();
@@ -72,7 +73,8 @@ class RedisClientRateLimiterTest {
                 1000,
                 List.of("mock"),
                 List.of(),
-                null
+                null,
+                List.of("lookup_weather")
         ));
 
         assertThat(result.allowed()).isTrue();

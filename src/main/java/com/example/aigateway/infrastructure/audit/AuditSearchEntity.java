@@ -33,8 +33,16 @@ public class AuditSearchEntity {
     @Column(nullable = false)
     private String provider;
 
+    private String model;
+
     @Column(nullable = false)
     private String status;
+
+    @Column(nullable = false)
+    private int toolCallCount;
+
+    @Column(length = 1000)
+    private String toolNames;
 
     @Column(length = 4000)
     private String searchText;
@@ -50,7 +58,10 @@ public class AuditSearchEntity {
             String tenantId,
             String clientId,
             String provider,
+            String model,
             String status,
+            int toolCallCount,
+            String toolNames,
             String searchText,
             Instant createdAt
     ) {
@@ -58,7 +69,10 @@ public class AuditSearchEntity {
         this.tenantId = tenantId;
         this.clientId = clientId;
         this.provider = provider;
+        this.model = model;
         this.status = status;
+        this.toolCallCount = toolCallCount;
+        this.toolNames = toolNames;
         this.searchText = searchText;
         this.createdAt = createdAt;
     }
@@ -79,8 +93,20 @@ public class AuditSearchEntity {
         return provider;
     }
 
+    public String getModel() {
+        return model;
+    }
+
     public String getStatus() {
         return status;
+    }
+
+    public int getToolCallCount() {
+        return toolCallCount;
+    }
+
+    public String getToolNames() {
+        return toolNames;
     }
 
     public String getSearchText() {

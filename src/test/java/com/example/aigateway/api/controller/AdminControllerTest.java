@@ -5,6 +5,8 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.example.aigateway.infrastructure.audit.AuditLogEntity;
+import com.example.aigateway.infrastructure.audit.AuditLogRepository;
 import com.example.aigateway.infrastructure.audit.AuditSearchEntity;
 import com.example.aigateway.infrastructure.audit.AuditSearchRepository;
 import java.time.Instant;
@@ -25,6 +27,9 @@ class AdminControllerTest {
 
     @Autowired
     private AuditSearchRepository auditSearchRepository;
+
+    @Autowired
+    private AuditLogRepository auditLogRepository;
 
     @Test
     @DisplayName("관리자 정책 override는 저장 후 조회할 수 있다")
@@ -120,7 +125,10 @@ class AdminControllerTest {
                 "tenant-default",
                 "local-operator",
                 "mock",
+                "gpt-4.1-mini",
                 "BLOCKED",
+                2,
+                "lookup_weather,lookup_time",
                 "req-admin-search-1 tenant-default local-operator mock BLOCKED credential dump incident",
                 Instant.now()
         ));
@@ -130,7 +138,57 @@ class AdminControllerTest {
                         .queryParam("q", "credential dump"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].requestId").value("req-admin-search-1"))
-                .andExpect(jsonPath("$[0].status").value("BLOCKED"));
+                .andExpect(jsonPath("$[0].model").value("gpt-4.1-mini"))
+                .andExpect(jsonPath("$[0].status").value("BLOCKED"))
+                .andExpect(jsonPath("$[0].toolCallCount").value(2))
+                .andExpect(jsonPath("$[0].toolNames[0]").value("lookup_weather"));
+
+        mockMvc.perform(get("/api/admin/audits/search")
+                        .header("X-API-Key", "local-admin-api-key")
+                        .queryParam("provider", "mock")
+                        .queryParam("model", "gpt-4.1-mini")
+                        .queryParam("tool", "lookup_time"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$[0].requestId").value("req-admin-search-1"));
+    }
+
+    @Test
+    @DisplayName("감사 로그 상세 조회는 tool usage와 cost를 반환한다")
+    void getsAuditDetail() throws Exception {
+        auditLogRepository.save(new AuditLogEntity(
+                "req-admin-detail-1",
+                "tenant-default",
+                "local-operator",
+                "user-001",
+                "OPERATOR",
+                "openai",
+                "gpt-4.1-mini",
+                "SUCCESS",
+                true,
+                "SAFE",
+                true,
+                false,
+                "",
+                2,
+                "lookup_weather,lookup_time",
+                120,
+                80,
+                200,
+                0.0042d,
+                150,
+                "날씨와 시간을 조회해줘",
+                Instant.now()
+        ));
+
+        mockMvc.perform(get("/api/admin/audits/req-admin-detail-1")
+                        .header("X-API-Key", "local-admin-api-key"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.requestId").value("req-admin-detail-1"))
+                .andExpect(jsonPath("$.model").value("gpt-4.1-mini"))
+                .andExpect(jsonPath("$.toolCallCount").value(2))
+                .andExpect(jsonPath("$.toolNames[1]").value("lookup_time"))
+                .andExpect(jsonPath("$.totalTokens").value(200))
+                .andExpect(jsonPath("$.costUsd").value(0.0042d));
     }
 
     @Test

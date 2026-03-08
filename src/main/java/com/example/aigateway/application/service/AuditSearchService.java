@@ -6,6 +6,7 @@ import com.example.aigateway.infrastructure.audit.AuditSearchRepository;
 import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.List;
+import java.util.Arrays;
 import javax.sql.DataSource;
 import org.springframework.stereotype.Service;
 
@@ -20,18 +21,28 @@ public class AuditSearchService {
         this.dataSource = dataSource;
     }
 
-    public List<AuditSearchItem> search(String tenantId, String query) {
+    public List<AuditSearchItem> search(String tenantId, String query, String provider, String model, String tool) {
         String normalizedQuery = query == null ? "" : query.trim();
-        if (normalizedQuery.isEmpty()) {
+        String normalizedProvider = provider == null ? "" : provider.trim();
+        String normalizedModel = model == null ? "" : model.trim();
+        String normalizedTool = tool == null ? "" : tool.trim();
+        if (normalizedQuery.isEmpty() && normalizedProvider.isEmpty() && normalizedModel.isEmpty() && normalizedTool.isEmpty()) {
             return List.of();
         }
 
         return searchEntities(tenantId, normalizedQuery).stream()
+                .filter(entity -> normalizedProvider.isEmpty() || normalizedProvider.equalsIgnoreCase(entity.getProvider()))
+                .filter(entity -> normalizedModel.isEmpty() || normalizedModel.equalsIgnoreCase(entity.getModel()))
+                .filter(entity -> normalizedTool.isEmpty() || splitToolNames(entity.getToolNames()).stream()
+                        .anyMatch(toolName -> toolName.equalsIgnoreCase(normalizedTool)))
                 .map(this::toItem)
                 .toList();
     }
 
     private List<AuditSearchEntity> searchEntities(String tenantId, String query) {
+        if (query == null || query.isBlank()) {
+            return repository.findTop50ByTenantIdOrderByIdDesc(tenantId);
+        }
         if (isPostgreSql()) {
             return repository.searchTop50ByTenantIdFullText(tenantId, query);
         }
@@ -44,8 +55,21 @@ public class AuditSearchService {
                 entity.getTenantId(),
                 entity.getClientId(),
                 entity.getProvider(),
-                entity.getStatus()
+                entity.getModel(),
+                entity.getStatus(),
+                entity.getToolCallCount(),
+                splitToolNames(entity.getToolNames())
         );
+    }
+
+    private List<String> splitToolNames(String toolNames) {
+        if (toolNames == null || toolNames.isBlank()) {
+            return List.of();
+        }
+        return Arrays.stream(toolNames.split(","))
+                .map(String::trim)
+                .filter(value -> !value.isEmpty())
+                .toList();
     }
 
     private boolean isPostgreSql() {

@@ -1,10 +1,12 @@
 package com.example.aigateway.application.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.aigateway.api.request.AiChatRequest;
 import com.example.aigateway.api.response.AiChatResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.example.aigateway.common.exception.GatewayException;
 import com.example.aigateway.domain.security.GatewayPrincipal;
 import java.util.List;
 import org.junit.jupiter.api.DisplayName;
@@ -22,7 +24,8 @@ class AiGatewayServiceTest {
             1000,
             50000,
             List.of("mock", "openai"),
-            List.of()
+            List.of(),
+            List.of("lookup_weather", "lookup_time")
     );
 
     @Autowired
@@ -161,8 +164,105 @@ class AiGatewayServiceTest {
         ), PRINCIPAL);
 
         assertThat(response.status()).isEqualTo("SUCCESS");
+        assertThat(response.data().content()).contains("lookup_weather");
         assertThat(response.data().toolCalls()).hasSize(1);
         assertThat(response.data().toolCalls().get(0).name()).isEqualTo("lookup_weather");
+    }
+
+    @Test
+    @DisplayName("여러 tool이 요청되면 모두 실행되고 최종 응답에 반영된다")
+    void executesMultipleTools() throws Exception {
+        AiChatResponse response = aiGatewayService.process(new AiChatRequest(
+                "user-001",
+                null,
+                "mock",
+                "날씨와 시간을 같이 확인해줘",
+                null,
+                null,
+                false,
+                List.of(
+                        new AiChatRequest.ToolDefinition(
+                                "function",
+                                "lookup_weather",
+                                "현재 날씨를 조회한다",
+                                objectMapper.readTree("""
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "city": {"type": "string"}
+                                          },
+                                          "required": ["city"]
+                                        }
+                                        """)
+                        ),
+                        new AiChatRequest.ToolDefinition(
+                                "function",
+                                "lookup_time",
+                                "현재 시간을 조회한다",
+                                objectMapper.readTree("""
+                                        {
+                                          "type": "object",
+                                          "properties": {
+                                            "timezone": {"type": "string"}
+                                          },
+                                          "required": ["timezone"]
+                                        }
+                                        """)
+                        )
+                ),
+                null
+        ), PRINCIPAL);
+
+        assertThat(response.status()).isEqualTo("SUCCESS");
+        assertThat(response.data().toolCalls()).hasSize(2);
+        assertThat(response.data().content()).contains("lookup_weather");
+        assertThat(response.data().content()).contains("lookup_time");
+        assertThat(response.data().content()).contains("Asia/Seoul");
+    }
+
+    @Test
+    @DisplayName("허용되지 않은 tool을 요청하면 거부된다")
+    void rejectsDisallowedToolRequest() throws Exception {
+        GatewayPrincipal limitedPrincipal = new GatewayPrincipal(
+                "test-client",
+                "tenant-test",
+                "OPERATOR",
+                1000,
+                50000,
+                List.of("mock", "openai"),
+                List.of(),
+                List.of("lookup_weather")
+        );
+
+        assertThatThrownBy(() -> aiGatewayService.process(new AiChatRequest(
+                "user-001",
+                null,
+                "mock",
+                "현재 시간을 확인해줘",
+                null,
+                null,
+                false,
+                List.of(new AiChatRequest.ToolDefinition(
+                        "function",
+                        "lookup_time",
+                        "현재 시간을 조회한다",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "object",
+                                  "properties": {
+                                    "timezone": {"type": "string"}
+                                  },
+                                  "required": ["timezone"]
+                                }
+                                """)
+                )),
+                new AiChatRequest.ToolChoice("function", "lookup_time")
+        ), limitedPrincipal))
+                .isInstanceOf(GatewayException.class)
+                .satisfies(exception -> {
+                    GatewayException gatewayException = (GatewayException) exception;
+                    assertThat(gatewayException.code()).isEqualTo("FORBIDDEN");
+                });
     }
 
     @Test

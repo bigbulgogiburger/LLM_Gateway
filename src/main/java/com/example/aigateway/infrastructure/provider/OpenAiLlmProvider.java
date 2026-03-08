@@ -3,8 +3,10 @@ package com.example.aigateway.infrastructure.provider;
 import com.example.aigateway.application.dto.AiGatewayCommand;
 import com.example.aigateway.application.dto.ProviderResult;
 import com.example.aigateway.application.dto.ProviderStreamEvent;
+import com.example.aigateway.application.dto.ToolExecutionResult;
 import com.example.aigateway.domain.provider.LlmProvider;
 import com.example.aigateway.domain.provider.ProviderCapabilities;
+import java.util.List;
 import java.util.function.Consumer;
 import org.springframework.stereotype.Component;
 
@@ -33,7 +35,26 @@ public class OpenAiLlmProvider implements LlmProvider {
     }
 
     @Override
+    public ProviderResult continueWithToolOutputs(
+            AiGatewayCommand command,
+            ProviderResult previousResult,
+            List<ToolExecutionResult> toolResults
+    ) {
+        return openAiApiClient.continueWithToolOutputs(command, previousResult, toolResults);
+    }
+
+    @Override
     public void stream(AiGatewayCommand command, Consumer<ProviderStreamEvent> eventConsumer) {
         openAiApiClient.stream(command, eventConsumer);
+    }
+
+    @Override
+    public void streamWithToolOutputs(
+            AiGatewayCommand command,
+            ProviderResult previousResult,
+            List<ToolExecutionResult> toolResults,
+            Consumer<ProviderStreamEvent> eventConsumer
+    ) {
+        openAiApiClient.streamWithToolOutputs(command, previousResult, toolResults, eventConsumer);
     }
 }

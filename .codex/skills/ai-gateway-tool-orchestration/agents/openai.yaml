@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Gateway Tool Orchestration"
+  short_description: "Build tool-call execution flows"
+  default_prompt: "Use $ai-gateway-tool-orchestration to implement or refine tool-call orchestration in this repository."

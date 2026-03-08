@@ -66,7 +66,8 @@ public class ApiKeyAuthenticationFilter extends OncePerRequestFilter {
                 client.dailyRequestQuota(),
                 client.dailyTokenQuota(),
                 client.allowedProviders(),
-                client.manageableTenants()
+                client.manageableTenants(),
+                client.allowedTools()
         );
         UsernamePasswordAuthenticationToken authentication = new UsernamePasswordAuthenticationToken(
                 principal,

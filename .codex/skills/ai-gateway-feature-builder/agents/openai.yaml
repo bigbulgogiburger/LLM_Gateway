@@ -1,0 +1,4 @@
+interface:
+  display_name: "AI Gateway Feature Builder"
+  short_description: "Build gateway features safely"
+  default_prompt: "Use $ai-gateway-feature-builder to add or extend a gateway feature in this repository."

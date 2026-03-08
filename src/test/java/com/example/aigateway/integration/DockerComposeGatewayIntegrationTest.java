@@ -111,12 +111,15 @@ class DockerComposeGatewayIntegrationTest {
                 "tenant-default",
                 "local-operator",
                 "mock",
+                "gpt-4.1-mini",
                 "BLOCKED",
+                1,
+                "lookup_weather",
                 "credential dump security incident escalation",
                 Instant.now()
         ));
 
-        assertThat(auditSearchService.search("tenant-default", "\"credential dump\""))
+        assertThat(auditSearchService.search("tenant-default", "\"credential dump\"", null, null, null))
                 .extracting("requestId")
                 .contains("req-it-1");
     }
@@ -137,7 +140,8 @@ class DockerComposeGatewayIntegrationTest {
                 10,
                 List.of("mock"),
                 List.of(),
-                null
+                null,
+                List.of("lookup_weather")
         );
 
         RateLimitResult first = clientRateLimiter.consume(client);

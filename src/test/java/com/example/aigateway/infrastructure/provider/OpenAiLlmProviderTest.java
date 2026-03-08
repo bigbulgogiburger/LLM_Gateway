@@ -18,13 +18,33 @@ class OpenAiLlmProviderTest {
         OpenAiApiClient client = new OpenAiApiClient() {
             @Override
             public ProviderResult generate(AiGatewayCommand command) {
-                return ProviderResult.text("openai:" + command.prompt());
+                return ProviderResult.text("openai:" + command.prompt(), "resp-1");
+            }
+
+            @Override
+            public ProviderResult continueWithToolOutputs(
+                    AiGatewayCommand command,
+                    ProviderResult previousResult,
+                    List<com.example.aigateway.application.dto.ToolExecutionResult> toolResults
+            ) {
+                return ProviderResult.text("tool-followup", "resp-2");
             }
 
             @Override
             public void stream(AiGatewayCommand command, java.util.function.Consumer<ProviderStreamEvent> eventConsumer) {
                 eventConsumer.accept(ProviderStreamEvent.textDelta("openai-stream", "resp-1"));
                 eventConsumer.accept(ProviderStreamEvent.done("resp-1"));
+            }
+
+            @Override
+            public void streamWithToolOutputs(
+                    AiGatewayCommand command,
+                    ProviderResult previousResult,
+                    List<com.example.aigateway.application.dto.ToolExecutionResult> toolResults,
+                    java.util.function.Consumer<ProviderStreamEvent> eventConsumer
+            ) {
+                eventConsumer.accept(ProviderStreamEvent.textDelta("tool-stream", "resp-2"));
+                eventConsumer.accept(ProviderStreamEvent.done("resp-2"));
             }
         };
         OpenAiLlmProvider provider = new OpenAiLlmProvider(client);

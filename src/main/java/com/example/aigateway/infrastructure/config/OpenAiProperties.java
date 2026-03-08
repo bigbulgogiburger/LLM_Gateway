@@ -10,7 +10,13 @@ public record OpenAiProperties(
         String model,
         String developerMessage,
         Integer maxCompletionTokens,
+        Pricing pricing,
         int connectTimeoutMillis,
         int readTimeoutMillis
 ) {
+    public record Pricing(
+            double inputCostPer1kTokens,
+            double outputCostPer1kTokens
+    ) {
+    }
 }

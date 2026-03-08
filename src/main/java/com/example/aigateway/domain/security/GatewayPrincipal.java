@@ -10,7 +10,8 @@ public record GatewayPrincipal(
         int dailyRequestQuota,
         int dailyTokenQuota,
         List<String> allowedProviders,
-        List<String> manageableTenants
+        List<String> manageableTenants,
+        List<String> allowedTools
 ) implements Principal {
 
     @Override
@@ -33,5 +34,12 @@ public record GatewayPrincipal(
             return false;
         }
         return manageableTenants.stream().anyMatch(allowedTenant -> allowedTenant.equalsIgnoreCase(requestedTenantId));
+    }
+
+    public boolean allowsTool(String toolName) {
+        if (toolName == null || toolName.isBlank() || allowedTools == null) {
+            return false;
+        }
+        return allowedTools.stream().anyMatch(allowedTool -> allowedTool.equalsIgnoreCase(toolName));
     }
 }

@@ -5,6 +5,9 @@ public record AuditSearchItem(
         String tenantId,
         String clientId,
         String provider,
-        String status
+        String model,
+        String status,
+        int toolCallCount,
+        java.util.List<String> toolNames
 ) {
 }

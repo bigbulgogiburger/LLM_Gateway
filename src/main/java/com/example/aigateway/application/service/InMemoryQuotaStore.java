@@ -48,6 +48,14 @@ public class InMemoryQuotaStore implements QuotaStore {
         }
     }
 
+    @Override
+    public void adjustTokens(String clientId, int deltaTokens) {
+        DailyQuotaState state = quotas.get(clientId);
+        if (state != null && deltaTokens != 0) {
+            state.tokenCount().addAndGet(deltaTokens);
+        }
+    }
+
     private record DailyQuotaState(LocalDate date, AtomicInteger requestCount, AtomicInteger tokenCount) {
     }
 }

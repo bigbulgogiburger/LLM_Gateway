@@ -25,7 +25,8 @@ class ApiKeyClientRegistryTest {
                         50000,
                         List.of("mock"),
                         List.of(),
-                        "2bcd99491790f5324dd084241b713b576a92b12c497f3b553230d49cc72e15c2"
+                        "2bcd99491790f5324dd084241b713b576a92b12c497f3b553230d49cc72e15c2",
+                        List.of("lookup_weather")
                 ))
         ));
 
@@ -51,7 +52,8 @@ class ApiKeyClientRegistryTest {
                         50000,
                         List.of("mock"),
                         List.of(),
-                        null
+                        null,
+                        List.of("lookup_weather")
                 ))
         ));
 

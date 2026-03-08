@@ -11,7 +11,8 @@ import org.springframework.context.annotation.Configuration;
         GatewaySecurityProperties.class,
         ProviderResilienceProperties.class,
         GatewayTenantPolicyProperties.class,
-        GatewayRedisProperties.class
+        GatewayRedisProperties.class,
+        ToolExecutionProperties.class
 })
 public class GuardrailPropertiesConfig {
 }

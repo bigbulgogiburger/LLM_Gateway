@@ -4,6 +4,8 @@ import com.example.aigateway.application.dto.AiGatewayCommand;
 import com.example.aigateway.application.dto.ProviderResult;
 import com.example.aigateway.application.dto.ProviderStreamEvent;
 import com.example.aigateway.application.dto.ProviderToolCall;
+import com.example.aigateway.application.dto.ProviderUsage;
+import com.example.aigateway.application.dto.ToolExecutionResult;
 import com.example.aigateway.common.exception.GatewayErrorCodes;
 import com.example.aigateway.common.exception.GatewayException;
 import com.example.aigateway.infrastructure.config.OpenAiProperties;
@@ -92,6 +94,67 @@ public class RestClientOpenAiApiClient implements OpenAiApiClient {
         }
     }
 
+    @Override
+    public ProviderResult continueWithToolOutputs(
+            AiGatewayCommand command,
+            ProviderResult previousResult,
+            List<ToolExecutionResult> toolResults
+    ) {
+        ensureConfigured();
+        try {
+            HttpRequest request = baseRequestBuilder()
+                    .uri(URI.create(normalizeBaseUrl() + "/responses"))
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(
+                            buildToolFollowUpRequestBody(command, previousResult, toolResults, false)
+                    )))
+                    .build();
+            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
+            JsonNode body = parseResponseBody(response);
+            return extractProviderResult(body);
+        } catch (IOException | InterruptedException exception) {
+            if (exception instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            log.warn("OpenAI tool follow-up invocation failed", exception);
+            throw new GatewayException(GatewayErrorCodes.PROVIDER_EXECUTION_FAILED, HttpStatus.BAD_GATEWAY,
+                    "OpenAI tool follow-up 호출에 실패했습니다.");
+        }
+    }
+
+    @Override
+    public void streamWithToolOutputs(
+            AiGatewayCommand command,
+            ProviderResult previousResult,
+            List<ToolExecutionResult> toolResults,
+            Consumer<ProviderStreamEvent> eventConsumer
+    ) {
+        ensureConfigured();
+        try {
+            HttpRequest request = baseRequestBuilder()
+                    .uri(URI.create(normalizeBaseUrl() + "/responses"))
+                    .POST(HttpRequest.BodyPublishers.ofString(objectMapper.writeValueAsString(
+                            buildToolFollowUpRequestBody(command, previousResult, toolResults, true)
+                    )))
+                    .build();
+            HttpResponse<java.io.InputStream> response = httpClient.send(request, HttpResponse.BodyHandlers.ofInputStream());
+            if (response.statusCode() >= 400) {
+                throw new GatewayException(
+                        GatewayErrorCodes.PROVIDER_EXECUTION_FAILED,
+                        HttpStatus.BAD_GATEWAY,
+                        "OpenAI tool streaming follow-up 호출에 실패했습니다."
+                );
+            }
+            readStream(response.body(), eventConsumer);
+        } catch (IOException | InterruptedException exception) {
+            if (exception instanceof InterruptedException) {
+                Thread.currentThread().interrupt();
+            }
+            log.warn("OpenAI tool streaming follow-up invocation failed", exception);
+            throw new GatewayException(GatewayErrorCodes.PROVIDER_EXECUTION_FAILED, HttpStatus.BAD_GATEWAY,
+                    "OpenAI tool streaming follow-up 호출에 실패했습니다.");
+        }
+    }
+
     private void readStream(java.io.InputStream inputStream, Consumer<ProviderStreamEvent> eventConsumer) throws IOException {
         try (BufferedReader reader = new BufferedReader(new InputStreamReader(inputStream, StandardCharsets.UTF_8))) {
             String line;
@@ -145,7 +208,14 @@ public class RestClientOpenAiApiClient implements OpenAiApiClient {
             return;
         }
         if ("response.completed".equals(type)) {
-            eventConsumer.accept(ProviderStreamEvent.done(responseId));
+            JsonNode response = node.path("response");
+            String model = response.path("model").asText(properties.model());
+            ProviderUsage usage = extractUsage(response.path("usage"));
+            eventConsumer.accept(ProviderStreamEvent.done(
+                    response.path("id").asText(responseId),
+                    model,
+                    usage
+            ));
             return;
         }
         if ("response.error".equals(type)) {
@@ -183,7 +253,13 @@ public class RestClientOpenAiApiClient implements OpenAiApiClient {
                     "OpenAI 응답에 생성 결과가 없습니다."
             );
         }
-        return new ProviderResult(text == null ? "" : text.trim(), toolCalls);
+        return new ProviderResult(
+                text == null ? "" : text.trim(),
+                toolCalls,
+                body.path("id").asText(null),
+                body.path("model").asText(properties.model()),
+                extractUsage(body.path("usage"))
+        );
     }
 
     private String extractTextFromOutput(JsonNode output) {
@@ -226,6 +302,61 @@ public class RestClientOpenAiApiClient implements OpenAiApiClient {
             body.put("stream", true);
         }
         return body;
+    }
+
+    private Map<String, Object> buildToolFollowUpRequestBody(
+            AiGatewayCommand command,
+            ProviderResult previousResult,
+            List<ToolExecutionResult> toolResults,
+            boolean stream
+    ) {
+        if (!StringUtils.hasText(previousResult.responseId())) {
+            throw new GatewayException(
+                    GatewayErrorCodes.PROVIDER_EXECUTION_FAILED,
+                    HttpStatus.BAD_GATEWAY,
+                    "tool follow-up에 필요한 response id가 없습니다."
+            );
+        }
+        Map<String, Object> body = new LinkedHashMap<>();
+        body.put("model", properties.model());
+        body.put("previous_response_id", previousResult.responseId());
+        body.put("instructions", properties.developerMessage() + responseFormatInstruction(command.responseFormat()));
+        body.put("input", toolResults.stream().map(result -> Map.of(
+                "type", "function_call_output",
+                "call_id", result.callId(),
+                "output", result.output()
+        )).toList());
+        body.put("max_output_tokens", properties.maxCompletionTokens());
+        if (command.responseFormat() != null) {
+            body.put("text", Map.of("format", buildResponseFormat(command.responseFormat())));
+        }
+        if (command.tools() != null && !command.tools().isEmpty()) {
+            body.put("tools", buildTools(command.tools()));
+        }
+        if (stream || command.stream()) {
+            body.put("stream", true);
+        }
+        return body;
+    }
+
+    private ProviderUsage extractUsage(JsonNode usageNode) {
+        if (usageNode == null || usageNode.isMissingNode() || usageNode.isNull()) {
+            return null;
+        }
+        int inputTokens = usageNode.path("input_tokens").asInt(0);
+        int outputTokens = usageNode.path("output_tokens").asInt(0);
+        int totalTokens = usageNode.path("total_tokens").asInt(inputTokens + outputTokens);
+        double costUsd = estimateCostUsd(inputTokens, outputTokens);
+        return new ProviderUsage(inputTokens, outputTokens, totalTokens, false, costUsd);
+    }
+
+    private double estimateCostUsd(int inputTokens, int outputTokens) {
+        OpenAiProperties.Pricing pricing = properties.pricing();
+        if (pricing == null) {
+            return 0.0d;
+        }
+        return (inputTokens / 1000.0d) * pricing.inputCostPer1kTokens()
+                + (outputTokens / 1000.0d) * pricing.outputCostPer1kTokens();
     }
 
     private List<Map<String, Object>> buildInput(AiGatewayCommand command) {

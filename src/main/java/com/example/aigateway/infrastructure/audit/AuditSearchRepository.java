@@ -6,6 +6,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface AuditSearchRepository extends JpaRepository<AuditSearchEntity, Long> {
+    List<AuditSearchEntity> findTop50ByTenantIdOrderByIdDesc(String tenantId);
+
     List<AuditSearchEntity> findTop50ByTenantIdAndSearchTextContainingIgnoreCaseOrderByIdDesc(String tenantId, String searchText);
 
     @Query(

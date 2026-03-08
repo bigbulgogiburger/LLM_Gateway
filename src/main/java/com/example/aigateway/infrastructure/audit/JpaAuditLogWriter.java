@@ -26,12 +26,19 @@ public class JpaAuditLogWriter {
                 event.userId(),
                 event.role(),
                 event.provider(),
+                event.model(),
                 event.status(),
                 event.passed(),
                 event.aiVerdict(),
                 event.outputPassed(),
                 event.outputModified(),
                 String.join(",", event.ruleCodes()),
+                event.toolCallCount(),
+                String.join(",", event.toolNames()),
+                event.inputTokens(),
+                event.outputTokens(),
+                event.totalTokens(),
+                event.costUsd(),
                 event.elapsedMillis(),
                 event.promptSummary(),
                 Instant.now()
@@ -41,7 +48,10 @@ public class JpaAuditLogWriter {
                 event.tenantId(),
                 event.clientId(),
                 event.provider(),
+                event.model(),
                 event.status(),
+                event.toolCallCount(),
+                String.join(",", event.toolNames()),
                 buildSearchText(event),
                 Instant.now()
         ));
@@ -53,9 +63,12 @@ public class JpaAuditLogWriter {
                         event.tenantId(),
                         event.clientId(),
                         event.provider(),
+                        event.model(),
                         event.status(),
                         event.aiVerdict(),
                         String.join(" ", event.ruleCodes()),
+                        String.join(" ", event.toolNames()),
+                        String.valueOf(event.toolCallCount()),
                         event.promptSummary()
                 )
                 .filter(Objects::nonNull)

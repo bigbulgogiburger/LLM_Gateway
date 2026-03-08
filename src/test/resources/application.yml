@@ -10,6 +10,8 @@ spring:
     open-in-view: false
 
 gateway:
+  tools:
+    execution-timeout-millis: 2000
   moderation:
     input:
       enabled: true
@@ -45,6 +47,9 @@ gateway:
           - mock
           - openai
         manageable-tenants: []
+        allowed-tools:
+          - lookup_weather
+          - lookup_time
       - client-id: local-admin
         tenant-id: tenant-default
         api-key-hash: 343511f8de8d241b42f5bfd2f4969eec3bbdc57fbb3eb252a8e4b840572ec89c
@@ -59,6 +64,9 @@ gateway:
           - tenant-default
           - tenant-enterprise
           - tenant-rollback
+        allowed-tools:
+          - lookup_weather
+          - lookup_time
   guardrail:
     input:
       max-prompt-length: 500
@@ -123,6 +131,9 @@ gateway:
       api-key: test-key
       base-url: https://api.openai.com/v1
       model: gpt-4.1-mini
+      pricing:
+        input-cost-per-1k-tokens: 0.0008
+        output-cost-per-1k-tokens: 0.0032
       developer-message: test
       max-completion-tokens: 400
       connect-timeout-millis: 3000

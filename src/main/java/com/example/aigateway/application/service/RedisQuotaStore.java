@@ -60,4 +60,14 @@ public class RedisQuotaStore implements QuotaStore {
         String tokenKey = redisProperties.namespace() + ":quota:token:" + clientId + ":" + today;
         redisTemplate.opsForValue().increment(tokenKey, responseTokens);
     }
+
+    @Override
+    public void adjustTokens(String clientId, int deltaTokens) {
+        if (deltaTokens == 0) {
+            return;
+        }
+        LocalDate today = LocalDate.now(ZoneId.systemDefault());
+        String tokenKey = redisProperties.namespace() + ":quota:token:" + clientId + ":" + today;
+        redisTemplate.opsForValue().increment(tokenKey, deltaTokens);
+    }
 }
