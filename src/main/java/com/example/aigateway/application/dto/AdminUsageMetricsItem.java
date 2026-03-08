@@ -20,6 +20,8 @@ public record AdminUsageMetricsItem(
         List<DimensionBreakdownItem> providerBreakdown,
         List<DimensionBreakdownItem> modelBreakdown,
         List<DimensionBreakdownItem> toolBreakdown,
+        List<DimensionBreakdownItem> blockedReasonBreakdown,
+        List<DimensionBreakdownItem> ruleCodeBreakdown,
         List<UsageTimeSeriesBucketItem> timeSeries
 ) {
     public record ProviderUsageBreakdownItem(

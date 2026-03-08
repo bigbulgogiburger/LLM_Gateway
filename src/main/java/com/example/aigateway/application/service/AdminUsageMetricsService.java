@@ -122,6 +122,36 @@ public class AdminUsageMetricsService {
                 .sorted(Comparator.comparingLong(AdminUsageMetricsItem.DimensionBreakdownItem::requests).reversed()
                         .thenComparing(AdminUsageMetricsItem.DimensionBreakdownItem::key))
                 .toList();
+        List<AdminUsageMetricsItem.DimensionBreakdownItem> blockedReasonBreakdown = buildDimensionBreakdown(
+                filtered.stream()
+                        .filter(entity -> "BLOCKED".equalsIgnoreCase(entity.getStatus()))
+                        .toList(),
+                entity -> entity.getRuleCodes() == null || entity.getRuleCodes().isBlank() ? "blocked_unknown" : firstCode(entity.getRuleCodes())
+        );
+        List<AdminUsageMetricsItem.DimensionBreakdownItem> ruleCodeBreakdown = filtered.stream()
+                .flatMap(entity -> extractCodes(entity.getRuleCodes()).stream()
+                        .map(ruleCode -> new ToolMetricSource(
+                                ruleCode,
+                                entity.getStatus(),
+                                entity.getTotalTokens(),
+                                entity.getCostUsd()
+                        )))
+                .collect(Collectors.groupingBy(ToolMetricSource::toolName))
+                .entrySet().stream()
+                .map(entry -> {
+                    List<ToolMetricSource> items = entry.getValue();
+                    return new AdminUsageMetricsItem.DimensionBreakdownItem(
+                            entry.getKey(),
+                            items.size(),
+                            items.stream().filter(item -> "SUCCESS".equalsIgnoreCase(item.status())).count(),
+                            items.stream().filter(item -> "BLOCKED".equalsIgnoreCase(item.status())).count(),
+                            items.stream().map(ToolMetricSource::totalTokens).filter(Objects::nonNull).mapToLong(Integer::longValue).sum(),
+                            items.stream().map(ToolMetricSource::costUsd).filter(Objects::nonNull).mapToDouble(Double::doubleValue).sum()
+                    );
+                })
+                .sorted(Comparator.comparingLong(AdminUsageMetricsItem.DimensionBreakdownItem::requests).reversed()
+                        .thenComparing(AdminUsageMetricsItem.DimensionBreakdownItem::key))
+                .toList();
 
         return new AdminUsageMetricsItem(
                 tenantId,
@@ -141,6 +171,8 @@ public class AdminUsageMetricsService {
                 providerBreakdown,
                 modelBreakdown,
                 toolBreakdown,
+                blockedReasonBreakdown,
+                ruleCodeBreakdown,
                 timeSeries
         );
     }
@@ -170,6 +202,20 @@ public class AdminUsageMetricsService {
             return date.atStartOfDay().toInstant(ZoneOffset.UTC);
         }
         return createdAt.truncatedTo(ChronoUnit.HOURS);
+    }
+
+    private List<String> extractCodes(String ruleCodes) {
+        if (ruleCodes == null || ruleCodes.isBlank()) {
+            return List.of();
+        }
+        return List.of(ruleCodes.split(",")).stream()
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .toList();
+    }
+
+    private String firstCode(String ruleCodes) {
+        return extractCodes(ruleCodes).stream().findFirst().orElse("blocked_unknown");
     }
 
     private List<AdminUsageMetricsItem.DimensionBreakdownItem> buildDimensionBreakdown(
