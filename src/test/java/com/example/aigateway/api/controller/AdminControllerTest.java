@@ -10,6 +10,7 @@ import com.example.aigateway.infrastructure.audit.AuditLogRepository;
 import com.example.aigateway.infrastructure.audit.AuditSearchEntity;
 import com.example.aigateway.infrastructure.audit.AuditSearchRepository;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -189,6 +190,108 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$.toolNames[1]").value("lookup_time"))
                 .andExpect(jsonPath("$.totalTokens").value(200))
                 .andExpect(jsonPath("$.costUsd").value(0.0042d));
+    }
+
+    @Test
+    @DisplayName("관리자는 usage metrics 요약을 provider/model 기준으로 조회할 수 있다")
+    void getsUsageMetrics() throws Exception {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.HOURS);
+        auditLogRepository.save(new AuditLogEntity(
+                "req-metrics-1",
+                "tenant-default",
+                "local-operator",
+                "user-001",
+                "OPERATOR",
+                "openai",
+                "gpt-4.1-mini",
+                "SUCCESS",
+                true,
+                "SAFE",
+                true,
+                false,
+                "",
+                1,
+                "lookup_weather",
+                100,
+                50,
+                150,
+                0.003d,
+                120,
+                "weather",
+                now.minus(2, ChronoUnit.HOURS)
+        ));
+        auditLogRepository.save(new AuditLogEntity(
+                "req-metrics-2",
+                "tenant-default",
+                "local-operator",
+                "user-002",
+                "OPERATOR",
+                "openai",
+                "gpt-4.1-mini",
+                "BLOCKED",
+                false,
+                "SAFE",
+                true,
+                false,
+                "OUTPUT_MODERATION_BLOCKED",
+                1,
+                "lookup_weather",
+                40,
+                10,
+                50,
+                0.001d,
+                80,
+                "blocked",
+                now.minus(1, ChronoUnit.HOURS)
+        ));
+        auditLogRepository.save(new AuditLogEntity(
+                "req-metrics-3",
+                "tenant-default",
+                "local-operator",
+                "user-003",
+                "OPERATOR",
+                "openai",
+                "gpt-4.1-mini",
+                "SUCCESS",
+                true,
+                "SAFE",
+                true,
+                false,
+                "",
+                1,
+                "lookup_time",
+                60,
+                20,
+                80,
+                0.002d,
+                60,
+                "time",
+                now.minus(1, ChronoUnit.HOURS)
+        ));
+
+        mockMvc.perform(get("/api/admin/metrics/usage")
+                        .header("X-API-Key", "local-admin-api-key")
+                        .queryParam("provider", "openai")
+                        .queryParam("model", "gpt-4.1-mini")
+                        .queryParam("tool", "lookup_weather")
+                        .queryParam("sinceHours", "24"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tenantId").value("tenant-default"))
+                .andExpect(jsonPath("$.sinceHours").value(24))
+                .andExpect(jsonPath("$.bucketUnit").value("hour"))
+                .andExpect(jsonPath("$.totalRequests").value(2))
+                .andExpect(jsonPath("$.successCount").value(1))
+                .andExpect(jsonPath("$.blockedCount").value(1))
+                .andExpect(jsonPath("$.totalTokens").value(200))
+                .andExpect(jsonPath("$.totalCostUsd").value(0.004d))
+                .andExpect(jsonPath("$.breakdown[0].provider").value("openai"))
+                .andExpect(jsonPath("$.breakdown[0].model").value("gpt-4.1-mini"))
+                .andExpect(jsonPath("$.timeSeries.length()").value(2))
+                .andExpect(jsonPath("$.timeSeries[0].requests").value(1))
+                .andExpect(jsonPath("$.timeSeries[0].totalTokens").value(150))
+                .andExpect(jsonPath("$.timeSeries[1].requests").value(1))
+                .andExpect(jsonPath("$.timeSeries[1].blockedCount").value(1))
+                .andExpect(jsonPath("$.timeSeries[1].totalTokens").value(50));
     }
 
     @Test

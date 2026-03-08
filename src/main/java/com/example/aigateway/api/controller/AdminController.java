@@ -1,11 +1,13 @@
 package com.example.aigateway.api.controller;
 
+import com.example.aigateway.application.dto.AdminUsageMetricsItem;
 import com.example.aigateway.application.dto.AuditDetailItem;
 import com.example.aigateway.application.dto.AuditSearchItem;
 import com.example.aigateway.application.dto.TenantPolicyOverrideHistoryItem;
 import com.example.aigateway.api.response.ProviderCapabilityView;
 import com.example.aigateway.application.service.AuditSearchService;
 import com.example.aigateway.application.service.AuditDetailService;
+import com.example.aigateway.application.service.AdminUsageMetricsService;
 import com.example.aigateway.common.exception.GatewayErrorCodes;
 import com.example.aigateway.common.exception.GatewayException;
 import com.example.aigateway.domain.guardrail.result.ResolvedGuardrailPolicy;
@@ -32,6 +34,7 @@ public class AdminController {
     private final TenantPolicyAdminService tenantPolicyAdminService;
     private final AuditSearchService auditSearchService;
     private final AuditDetailService auditDetailService;
+    private final AdminUsageMetricsService adminUsageMetricsService;
     private final GuardrailPolicyResolver guardrailPolicyResolver;
     private final ProviderRouter providerRouter;
 
@@ -39,12 +42,14 @@ public class AdminController {
             TenantPolicyAdminService tenantPolicyAdminService,
             AuditSearchService auditSearchService,
             AuditDetailService auditDetailService,
+            AdminUsageMetricsService adminUsageMetricsService,
             GuardrailPolicyResolver guardrailPolicyResolver,
             ProviderRouter providerRouter
     ) {
         this.tenantPolicyAdminService = tenantPolicyAdminService;
         this.auditSearchService = auditSearchService;
         this.auditDetailService = auditDetailService;
+        this.adminUsageMetricsService = adminUsageMetricsService;
         this.guardrailPolicyResolver = guardrailPolicyResolver;
         this.providerRouter = providerRouter;
     }
@@ -113,6 +118,17 @@ public class AdminController {
             @AuthenticationPrincipal GatewayPrincipal principal
     ) {
         return auditDetailService.getByRequestId(principal.tenantId(), requestId);
+    }
+
+    @GetMapping("/metrics/usage")
+    public AdminUsageMetricsItem getUsageMetrics(
+            @RequestParam(required = false) String provider,
+            @RequestParam(required = false) String model,
+            @RequestParam(required = false) String tool,
+            @RequestParam(required = false) Integer sinceHours,
+            @AuthenticationPrincipal GatewayPrincipal principal
+    ) {
+        return adminUsageMetricsService.summarize(principal.tenantId(), provider, model, tool, sinceHours);
     }
 
     @GetMapping("/providers")

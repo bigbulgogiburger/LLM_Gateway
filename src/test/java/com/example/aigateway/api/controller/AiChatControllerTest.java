@@ -7,6 +7,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
+import com.example.aigateway.infrastructure.audit.AuditLogEntity;
+import com.example.aigateway.infrastructure.audit.AuditLogRepository;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -22,6 +24,9 @@ class AiChatControllerTest {
 
     @Autowired
     private MockMvc mockMvc;
+
+    @Autowired
+    private AuditLogRepository auditLogRepository;
 
     @Test
     @DisplayName("채팅 API는 허용된 요청에 성공 응답을 반환한다")
@@ -134,6 +139,11 @@ class AiChatControllerTest {
                 .andExpect(status().isOk())
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("event:chunk")))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("event:done")));
+
+        AuditLogEntity audit = auditLogRepository.findTopByTenantIdOrderByIdDesc("tenant-default").orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(audit.getModel()).isEqualTo("mock-gateway");
+        org.assertj.core.api.Assertions.assertThat(audit.getTotalTokens()).isNotNull();
+        org.assertj.core.api.Assertions.assertThat(audit.getCostUsd()).isEqualTo(0.0d);
     }
 
     @Test
@@ -211,5 +221,10 @@ class AiChatControllerTest {
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("lookup_weather")))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("temperatureCelsius")))
                 .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("event:done")));
+
+        AuditLogEntity audit = auditLogRepository.findTopByTenantIdOrderByIdDesc("tenant-default").orElseThrow();
+        org.assertj.core.api.Assertions.assertThat(audit.getToolCallCount()).isEqualTo(1);
+        org.assertj.core.api.Assertions.assertThat(audit.getToolNames()).contains("lookup_weather");
+        org.assertj.core.api.Assertions.assertThat(audit.getTotalTokens()).isNotNull();
     }
 }
