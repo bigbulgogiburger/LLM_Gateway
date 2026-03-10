@@ -27,6 +27,16 @@ public record AdminDashboardOverviewItem(
         ActorSummaryItem dominantBlockedClient,
         ActorSummaryItem dominantBlockedUser,
         PeakHourItem peakHour,
+        List<FailureSampleItem> providerFailureSamples,
+        List<FailureSampleItem> modelFailureSamples,
+        List<FailureSampleItem> toolFailureSamples,
+        List<TrendPointItem> blockedTrend,
+        List<TrendPointItem> costTrend,
+        List<TrendPointItem> guardrailTrend,
+        List<RiskScoreItem> clientRiskScores,
+        List<RiskScoreItem> userRiskScores,
+        List<EfficiencyScoreItem> providerEfficiencyScores,
+        List<EfficiencyScoreItem> modelEfficiencyScores,
         List<RecentBlockedItem> recentBlocked,
         List<RecentBlockedItem> recentFailed,
         List<RecentBlockedItem> recentGuardrailHits,
@@ -81,6 +91,32 @@ public record AdminDashboardOverviewItem(
             String bucketStart,
             long requests,
             long totalTokens
+    ) {
+    }
+
+    public record FailureSampleItem(
+            String key,
+            String requestId,
+            String reasonCode,
+            String createdAt
+    ) {
+    }
+
+    public record TrendPointItem(
+            String key,
+            long value
+    ) {
+    }
+
+    public record RiskScoreItem(
+            String key,
+            int score
+    ) {
+    }
+
+    public record EfficiencyScoreItem(
+            String key,
+            double score
     ) {
     }
 }

@@ -98,6 +98,44 @@ public class AdminDashboardOverviewService {
         List<AdminDashboardOverviewItem.RecentBlockedItem> recentGuardrailHits = recentBlocked.stream()
                 .filter(item -> !"blocked_unknown".equals(item.reasonCode()))
                 .toList();
+        List<AdminDashboardOverviewItem.FailureSampleItem> providerFailureSamples = buildFailureSamples(
+                recentLogs,
+                AuditLogEntity::getProvider
+        );
+        List<AdminDashboardOverviewItem.FailureSampleItem> modelFailureSamples = buildFailureSamples(
+                recentLogs,
+                entity -> entity.getModel() == null ? "unknown" : entity.getModel()
+        );
+        List<AdminDashboardOverviewItem.FailureSampleItem> toolFailureSamples = recentLogs.stream()
+                .filter(entity -> "BLOCKED".equalsIgnoreCase(entity.getStatus()))
+                .flatMap(entity -> extractTools(entity.getToolNames()).stream()
+                        .map(tool -> new AdminDashboardOverviewItem.FailureSampleItem(
+                                tool,
+                                entity.getRequestId(),
+                                firstReasonCode(entity.getRuleCodes()),
+                                entity.getCreatedAt().toString()
+                        )))
+                .limit(5)
+                .toList();
+        List<AdminDashboardOverviewItem.TrendPointItem> blockedTrend = usage.timeSeries().stream()
+                .map(item -> new AdminDashboardOverviewItem.TrendPointItem(item.bucketStart(), item.blockedCount()))
+                .toList();
+        List<AdminDashboardOverviewItem.TrendPointItem> costTrend = usage.timeSeries().stream()
+                .map(item -> new AdminDashboardOverviewItem.TrendPointItem(item.bucketStart(), Math.round(item.totalCostUsd() * 1_000_000)))
+                .toList();
+        List<AdminDashboardOverviewItem.TrendPointItem> guardrailTrend = usage.timeSeries().stream()
+                .map(item -> new AdminDashboardOverviewItem.TrendPointItem(item.bucketStart(), item.blockedCount()))
+                .toList();
+        List<AdminDashboardOverviewItem.RiskScoreItem> clientRiskScores = buildRiskScores(recentLogs, true);
+        List<AdminDashboardOverviewItem.RiskScoreItem> userRiskScores = buildRiskScores(recentLogs, false);
+        List<AdminDashboardOverviewItem.EfficiencyScoreItem> providerEfficiencyScores = buildEfficiencyScores(
+                recentLogs,
+                AuditLogEntity::getProvider
+        );
+        List<AdminDashboardOverviewItem.EfficiencyScoreItem> modelEfficiencyScores = buildEfficiencyScores(
+                recentLogs,
+                entity -> entity.getModel() == null ? "unknown" : entity.getModel()
+        );
 
         return new AdminDashboardOverviewItem(
                 tenantId,
@@ -124,6 +162,16 @@ public class AdminDashboardOverviewService {
                 dominantBlockedClient,
                 dominantBlockedUser,
                 peakHour,
+                providerFailureSamples,
+                modelFailureSamples,
+                toolFailureSamples,
+                blockedTrend,
+                costTrend,
+                guardrailTrend,
+                clientRiskScores,
+                userRiskScores,
+                providerEfficiencyScores,
+                modelEfficiencyScores,
                 recentBlocked,
                 recentFailed,
                 recentGuardrailHits,
@@ -180,6 +228,79 @@ public class AdminDashboardOverviewService {
                 .max(java.util.Map.Entry.<String, Long>comparingByValue().thenComparing(java.util.Map.Entry.comparingByKey()))
                 .map(entry -> new AdminDashboardOverviewItem.ActorSummaryItem(entry.getKey(), entry.getValue()))
                 .orElse(null);
+    }
+
+    private List<AdminDashboardOverviewItem.FailureSampleItem> buildFailureSamples(
+            List<AuditLogEntity> recentLogs,
+            java.util.function.Function<AuditLogEntity, String> keyExtractor
+    ) {
+        return recentLogs.stream()
+                .filter(entity -> "BLOCKED".equalsIgnoreCase(entity.getStatus()))
+                .sorted(Comparator.comparing(AuditLogEntity::getCreatedAt).reversed())
+                .map(entity -> new AdminDashboardOverviewItem.FailureSampleItem(
+                        keyExtractor.apply(entity),
+                        entity.getRequestId(),
+                        firstReasonCode(entity.getRuleCodes()),
+                        entity.getCreatedAt().toString()
+                ))
+                .limit(5)
+                .toList();
+    }
+
+    private List<String> extractTools(String toolNames) {
+        if (toolNames == null || toolNames.isBlank()) {
+            return List.of();
+        }
+        return List.of(toolNames.split(",")).stream()
+                .map(String::trim)
+                .filter(value -> !value.isBlank())
+                .toList();
+    }
+
+    private List<AdminDashboardOverviewItem.RiskScoreItem> buildRiskScores(List<AuditLogEntity> recentLogs, boolean client) {
+        return recentLogs.stream()
+                .collect(java.util.stream.Collectors.groupingBy(
+                        entity -> client ? entity.getClientId() : entity.getUserId()
+                ))
+                .entrySet().stream()
+                .filter(entry -> entry.getKey() != null)
+                .map(entry -> {
+                    long blocked = entry.getValue().stream().filter(entity -> "BLOCKED".equalsIgnoreCase(entity.getStatus())).count();
+                    int riskScore = (int) Math.min(100, blocked * 40 + entry.getValue().size() * 10);
+                    return new AdminDashboardOverviewItem.RiskScoreItem(entry.getKey(), riskScore);
+                })
+                .sorted(Comparator.comparingInt(AdminDashboardOverviewItem.RiskScoreItem::score).reversed()
+                        .thenComparing(AdminDashboardOverviewItem.RiskScoreItem::key))
+                .limit(5)
+                .toList();
+    }
+
+    private List<AdminDashboardOverviewItem.EfficiencyScoreItem> buildEfficiencyScores(
+            List<AuditLogEntity> recentLogs,
+            java.util.function.Function<AuditLogEntity, String> keyExtractor
+    ) {
+        return recentLogs.stream()
+                .collect(java.util.stream.Collectors.groupingBy(keyExtractor))
+                .entrySet().stream()
+                .filter(entry -> entry.getKey() != null)
+                .map(entry -> {
+                    double totalCost = entry.getValue().stream()
+                            .map(AuditLogEntity::getCostUsd)
+                            .filter(Objects::nonNull)
+                            .mapToDouble(Double::doubleValue)
+                            .sum();
+                    long totalTokens = entry.getValue().stream()
+                            .map(AuditLogEntity::getTotalTokens)
+                            .filter(Objects::nonNull)
+                            .mapToLong(Integer::longValue)
+                            .sum();
+                    double efficiency = totalTokens == 0 ? 0.0d : totalTokens / Math.max(totalCost, 0.000001d);
+                    return new AdminDashboardOverviewItem.EfficiencyScoreItem(entry.getKey(), efficiency);
+                })
+                .sorted(Comparator.comparingDouble(AdminDashboardOverviewItem.EfficiencyScoreItem::score).reversed()
+                        .thenComparing(AdminDashboardOverviewItem.EfficiencyScoreItem::key))
+                .limit(5)
+                .toList();
     }
 
     private List<AdminUsageMetricsItem.DimensionBreakdownItem> limitBreakdown(
