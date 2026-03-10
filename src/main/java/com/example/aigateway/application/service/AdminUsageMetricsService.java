@@ -165,6 +165,19 @@ public class AdminUsageMetricsService {
                 .sorted(Comparator.comparingLong(AdminUsageMetricsItem.DimensionBreakdownItem::requests).reversed()
                         .thenComparing(AdminUsageMetricsItem.DimensionBreakdownItem::key))
                 .toList();
+        AdminUsageMetricsItem.ComparisonItem comparison = new AdminUsageMetricsItem.ComparisonItem(
+                previousSummary.totalRequests(),
+                previousSummary.successCount(),
+                previousSummary.blockedCount(),
+                previousSummary.totalTokens(),
+                previousSummary.totalCostUsd(),
+                currentSummary.totalRequests() - previousSummary.totalRequests(),
+                currentSummary.successCount() - previousSummary.successCount(),
+                currentSummary.blockedCount() - previousSummary.blockedCount(),
+                currentSummary.totalTokens() - previousSummary.totalTokens(),
+                currentSummary.totalCostUsd() - previousSummary.totalCostUsd()
+        );
+        List<AdminUsageMetricsItem.AnomalyFlagItem> anomalyFlags = detectAnomalies(currentSummary, previousSummary);
 
         return new AdminUsageMetricsItem(
                 tenantId,
@@ -188,18 +201,8 @@ public class AdminUsageMetricsService {
                 toolBreakdown,
                 blockedReasonBreakdown,
                 ruleCodeBreakdown,
-                new AdminUsageMetricsItem.ComparisonItem(
-                        previousSummary.totalRequests(),
-                        previousSummary.successCount(),
-                        previousSummary.blockedCount(),
-                        previousSummary.totalTokens(),
-                        previousSummary.totalCostUsd(),
-                        currentSummary.totalRequests() - previousSummary.totalRequests(),
-                        currentSummary.successCount() - previousSummary.successCount(),
-                        currentSummary.blockedCount() - previousSummary.blockedCount(),
-                        currentSummary.totalTokens() - previousSummary.totalTokens(),
-                        currentSummary.totalCostUsd() - previousSummary.totalCostUsd()
-                ),
+                comparison,
+                anomalyFlags,
                 timeSeries
         );
     }
@@ -278,6 +281,33 @@ public class AdminUsageMetricsService {
 
     private String safeDimensionKey(String value) {
         return value == null || value.isBlank() ? "unknown" : value;
+    }
+
+    private List<AdminUsageMetricsItem.AnomalyFlagItem> detectAnomalies(MetricsSummary currentSummary, MetricsSummary previousSummary) {
+        java.util.ArrayList<AdminUsageMetricsItem.AnomalyFlagItem> flags = new java.util.ArrayList<>();
+
+        if (currentSummary.totalRequests() >= 10 && currentSummary.totalRequests() >= Math.max(1, previousSummary.totalRequests()) * 2) {
+            flags.add(new AdminUsageMetricsItem.AnomalyFlagItem(
+                    "REQUEST_SPIKE",
+                    "warning",
+                    "최근 요청 수가 직전 구간 대비 2배 이상 증가했습니다."
+            ));
+        }
+        if (currentSummary.blockedCount() >= 1 && currentSummary.blockedCount() > previousSummary.blockedCount()) {
+            flags.add(new AdminUsageMetricsItem.AnomalyFlagItem(
+                    "BLOCKED_SPIKE",
+                    "warning",
+                    "차단 요청 수가 직전 구간보다 증가했습니다."
+            ));
+        }
+        if (currentSummary.totalCostUsd() >= 0.01d && currentSummary.totalCostUsd() >= Math.max(0.000001d, previousSummary.totalCostUsd()) * 2) {
+            flags.add(new AdminUsageMetricsItem.AnomalyFlagItem(
+                    "COST_SPIKE",
+                    "critical",
+                    "최근 비용이 직전 구간 대비 2배 이상 증가했습니다."
+            ));
+        }
+        return List.copyOf(flags);
     }
 
     private record ToolMetricSource(

@@ -335,6 +335,8 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$.comparison.blockedDelta").value(1))
                 .andExpect(jsonPath("$.comparison.tokenDelta").value(100))
                 .andExpect(jsonPath("$.comparison.costDeltaUsd").value(0.002d))
+                .andExpect(jsonPath("$.anomalyFlags[0].code").value("BLOCKED_SPIKE"))
+                .andExpect(jsonPath("$.anomalyFlags[0].severity").value("warning"))
                 .andExpect(jsonPath("$.timeSeries.length()").value(2))
                 .andExpect(jsonPath("$.timeSeries[0].requests").value(1))
                 .andExpect(jsonPath("$.timeSeries[0].totalTokens").value(150))
@@ -412,6 +414,7 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$.ruleCodeBreakdown.length()").value(0))
                 .andExpect(jsonPath("$.comparison.previousTotalRequests").value(0))
                 .andExpect(jsonPath("$.comparison.requestDelta").value(2))
+                .andExpect(jsonPath("$.anomalyFlags.length()").value(0))
                 .andExpect(jsonPath("$.timeSeries.length()").value(2))
                 .andExpect(jsonPath("$.timeSeries[0].requests").value(1))
                 .andExpect(jsonPath("$.timeSeries[1].requests").value(1));

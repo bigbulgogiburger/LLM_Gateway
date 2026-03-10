@@ -25,6 +25,7 @@ public record AdminUsageMetricsItem(
         List<DimensionBreakdownItem> blockedReasonBreakdown,
         List<DimensionBreakdownItem> ruleCodeBreakdown,
         ComparisonItem comparison,
+        List<AnomalyFlagItem> anomalyFlags,
         List<UsageTimeSeriesBucketItem> timeSeries
 ) {
     public record ProviderUsageBreakdownItem(
@@ -67,6 +68,13 @@ public record AdminUsageMetricsItem(
             long blockedDelta,
             long tokenDelta,
             double costDeltaUsd
+    ) {
+    }
+
+    public record AnomalyFlagItem(
+            String code,
+            String severity,
+            String message
     ) {
     }
 }
