@@ -74,6 +74,30 @@ public class AdminDashboardOverviewService {
                 .max(Instant::compareTo)
                 .map(Instant::toString)
                 .orElse(null);
+        int healthScore = calculateHealthScore(usage, blockedRate);
+        String alertSeverity = calculateAlertSeverity(usage);
+        boolean staleTenant = recentLogs.isEmpty();
+        AdminDashboardOverviewItem.HotspotItem toolCostHotspot = usage.toolBreakdown().stream()
+                .max(Comparator.comparing(AdminUsageMetricsItem.DimensionBreakdownItem::totalCostUsd)
+                        .thenComparing(AdminUsageMetricsItem.DimensionBreakdownItem::key))
+                .map(item -> new AdminDashboardOverviewItem.HotspotItem(item.key(), item.totalTokens(), item.totalCostUsd()))
+                .orElse(null);
+        AdminDashboardOverviewItem.RecommendationItem providerSwitchRecommendation = buildProviderRecommendation(usage, costPer1kTokens);
+        AdminDashboardOverviewItem.ActorSummaryItem dominantBlockedClient = buildBlockedActorSummary(recentLogs, true);
+        AdminDashboardOverviewItem.ActorSummaryItem dominantBlockedUser = buildBlockedActorSummary(recentLogs, false);
+        AdminDashboardOverviewItem.PeakHourItem peakHour = usage.timeSeries().stream()
+                .max(Comparator.comparing(AdminUsageMetricsItem.UsageTimeSeriesBucketItem::requests)
+                        .thenComparing(AdminUsageMetricsItem.UsageTimeSeriesBucketItem::totalTokens))
+                .map(item -> new AdminDashboardOverviewItem.PeakHourItem(
+                        item.bucketStart(),
+                        item.requests(),
+                        item.totalTokens()
+                ))
+                .orElse(null);
+        List<AdminDashboardOverviewItem.RecentBlockedItem> recentFailed = recentBlocked;
+        List<AdminDashboardOverviewItem.RecentBlockedItem> recentGuardrailHits = recentBlocked.stream()
+                .filter(item -> !"blocked_unknown".equals(item.reasonCode()))
+                .toList();
 
         return new AdminDashboardOverviewItem(
                 tenantId,
@@ -85,6 +109,9 @@ public class AdminDashboardOverviewService {
                 successRate,
                 blockedRate,
                 costPer1kTokens,
+                healthScore,
+                alertSeverity,
+                staleTenant,
                 lastRequestAt,
                 usage,
                 limitBreakdown(usage.providerBreakdown(), 3),
@@ -92,9 +119,67 @@ public class AdminDashboardOverviewService {
                 limitBreakdown(usage.clientBreakdown(), 3),
                 limitBreakdown(usage.userBreakdown(), 3),
                 limitBreakdown(usage.blockedReasonBreakdown(), 3),
+                toolCostHotspot,
+                providerSwitchRecommendation,
+                dominantBlockedClient,
+                dominantBlockedUser,
+                peakHour,
                 recentBlocked,
+                recentFailed,
+                recentGuardrailHits,
                 recentCostly
         );
+    }
+
+    private int calculateHealthScore(AdminUsageMetricsItem usage, double blockedRate) {
+        int score = 100;
+        score -= usage.anomalyFlags().size() * 15;
+        score -= (int) Math.round(blockedRate);
+        if (usage.totalCostUsd() > 0.01d) {
+            score -= 10;
+        }
+        return Math.max(0, score);
+    }
+
+    private String calculateAlertSeverity(AdminUsageMetricsItem usage) {
+        boolean hasCritical = usage.anomalyFlags().stream().anyMatch(flag -> "critical".equalsIgnoreCase(flag.severity()));
+        if (hasCritical) {
+            return "critical";
+        }
+        if (!usage.anomalyFlags().isEmpty()) {
+            return "warning";
+        }
+        return "normal";
+    }
+
+    private AdminDashboardOverviewItem.RecommendationItem buildProviderRecommendation(
+            AdminUsageMetricsItem usage,
+            double costPer1kTokens
+    ) {
+        if (costPer1kTokens > 0.03d) {
+            return new AdminDashboardOverviewItem.RecommendationItem(
+                    "REVIEW_PROVIDER_MIX",
+                    "비용이 높은 편입니다. mock 또는 더 저렴한 provider/model 조합 검토가 필요합니다."
+            );
+        }
+        if (usage.blockedCount() > 0) {
+            return new AdminDashboardOverviewItem.RecommendationItem(
+                    "REVIEW_GUARDRAILS",
+                    "차단 요청이 발생했습니다. 입력 정책과 클라이언트 사용 패턴을 점검하세요."
+            );
+        }
+        return null;
+    }
+
+    private AdminDashboardOverviewItem.ActorSummaryItem buildBlockedActorSummary(List<AuditLogEntity> recentLogs, boolean client) {
+        return recentLogs.stream()
+                .filter(entity -> "BLOCKED".equalsIgnoreCase(entity.getStatus()))
+                .collect(java.util.stream.Collectors.groupingBy(entity -> client ? entity.getClientId() : entity.getUserId(), java.util.stream.Collectors.counting()))
+                .entrySet().stream()
+                .filter(entry -> entry.getKey() != null)
+                .max(java.util.Map.Entry.<String, Long>comparingByValue().thenComparing(java.util.Map.Entry.comparingByKey()))
+                .map(entry -> new AdminDashboardOverviewItem.ActorSummaryItem(entry.getKey(), entry.getValue()))
+                .orElse(null);
     }
 
     private List<AdminUsageMetricsItem.DimensionBreakdownItem> limitBreakdown(

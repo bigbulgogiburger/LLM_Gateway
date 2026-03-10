@@ -12,6 +12,9 @@ public record AdminDashboardOverviewItem(
         double successRate,
         double blockedRate,
         double costPer1kTokens,
+        int healthScore,
+        String alertSeverity,
+        boolean staleTenant,
         String lastRequestAt,
         AdminUsageMetricsItem usage,
         List<AdminUsageMetricsItem.DimensionBreakdownItem> topProviders,
@@ -19,7 +22,14 @@ public record AdminDashboardOverviewItem(
         List<AdminUsageMetricsItem.DimensionBreakdownItem> topClients,
         List<AdminUsageMetricsItem.DimensionBreakdownItem> topUsers,
         List<AdminUsageMetricsItem.DimensionBreakdownItem> topBlockedReasons,
+        HotspotItem toolCostHotspot,
+        RecommendationItem providerSwitchRecommendation,
+        ActorSummaryItem dominantBlockedClient,
+        ActorSummaryItem dominantBlockedUser,
+        PeakHourItem peakHour,
         List<RecentBlockedItem> recentBlocked,
+        List<RecentBlockedItem> recentFailed,
+        List<RecentBlockedItem> recentGuardrailHits,
         List<RecentCostlyItem> recentCostly
 ) {
     public record RecentBlockedItem(
@@ -45,6 +55,32 @@ public record AdminDashboardOverviewItem(
             long totalTokens,
             double costUsd,
             String createdAt
+    ) {
+    }
+
+    public record HotspotItem(
+            String key,
+            long totalTokens,
+            double totalCostUsd
+    ) {
+    }
+
+    public record RecommendationItem(
+            String code,
+            String message
+    ) {
+    }
+
+    public record ActorSummaryItem(
+            String key,
+            long blockedCount
+    ) {
+    }
+
+    public record PeakHourItem(
+            String bucketStart,
+            long requests,
+            long totalTokens
     ) {
     }
 }
