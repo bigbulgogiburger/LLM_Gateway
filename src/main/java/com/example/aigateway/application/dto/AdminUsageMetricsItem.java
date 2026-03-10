@@ -24,6 +24,7 @@ public record AdminUsageMetricsItem(
         List<DimensionBreakdownItem> toolBreakdown,
         List<DimensionBreakdownItem> blockedReasonBreakdown,
         List<DimensionBreakdownItem> ruleCodeBreakdown,
+        ComparisonItem comparison,
         List<UsageTimeSeriesBucketItem> timeSeries
 ) {
     public record ProviderUsageBreakdownItem(
@@ -52,6 +53,20 @@ public record AdminUsageMetricsItem(
             long blockedCount,
             long totalTokens,
             double totalCostUsd
+    ) {
+    }
+
+    public record ComparisonItem(
+            long previousTotalRequests,
+            long previousSuccessCount,
+            long previousBlockedCount,
+            long previousTotalTokens,
+            double previousTotalCostUsd,
+            long requestDelta,
+            long successDelta,
+            long blockedDelta,
+            long tokenDelta,
+            double costDeltaUsd
     ) {
     }
 }

@@ -24,23 +24,28 @@ public class AdminUsageMetricsService {
 
     public AdminUsageMetricsItem summarize(String tenantId, String provider, String model, String tool, Integer sinceHours) {
         int effectiveSinceHours = sinceHours == null ? 24 : sinceHours;
-        Instant since = Instant.now().minus(effectiveSinceHours, ChronoUnit.HOURS);
+        Instant now = Instant.now();
+        Instant since = now.minus(effectiveSinceHours, ChronoUnit.HOURS);
+        Instant previousSince = since.minus(effectiveSinceHours, ChronoUnit.HOURS);
         String bucketUnit = effectiveSinceHours <= 48 ? "hour" : "day";
-        List<AuditLogEntity> filtered = auditLogRepository.findTop500ByTenantIdAndCreatedAtAfterOrderByCreatedAtDesc(tenantId, since).stream()
-                .filter(entity -> provider == null || provider.isBlank() || provider.equalsIgnoreCase(entity.getProvider()))
-                .filter(entity -> model == null || model.isBlank() || Objects.equals(model.toLowerCase(), safeLower(entity.getModel())))
-                .filter(entity -> tool == null || tool.isBlank() || containsTool(entity.getToolNames(), tool))
+        List<AuditLogEntity> currentWindow = filterEntities(
+                auditLogRepository.findTop500ByTenantIdAndCreatedAtAfterOrderByCreatedAtDesc(tenantId, since),
+                provider,
+                model,
+                tool
+        );
+        List<AuditLogEntity> previousWindow = filterEntities(
+                auditLogRepository.findTop500ByTenantIdAndCreatedAtAfterOrderByCreatedAtDesc(tenantId, previousSince).stream()
+                        .filter(entity -> entity.getCreatedAt().isBefore(since))
+                        .toList(),
+                provider,
+                model,
+                tool
+        );
+        MetricsSummary currentSummary = summarizeMetrics(currentWindow);
+        MetricsSummary previousSummary = summarizeMetrics(previousWindow);
+        List<AuditLogEntity> filtered = currentWindow.stream()
                 .toList();
-
-        long successCount = filtered.stream().filter(entity -> "SUCCESS".equalsIgnoreCase(entity.getStatus())).count();
-        long blockedCount = filtered.stream().filter(entity -> "BLOCKED".equalsIgnoreCase(entity.getStatus())).count();
-        long totalToolCalls = filtered.stream().mapToLong(AuditLogEntity::getToolCallCount).sum();
-        long totalInputTokens = filtered.stream().map(AuditLogEntity::getInputTokens).filter(Objects::nonNull).mapToLong(Integer::longValue).sum();
-        long totalOutputTokens = filtered.stream().map(AuditLogEntity::getOutputTokens).filter(Objects::nonNull).mapToLong(Integer::longValue).sum();
-        long totalTokens = filtered.stream().map(AuditLogEntity::getTotalTokens).filter(Objects::nonNull).mapToLong(Integer::longValue).sum();
-        double totalCostUsd = filtered.stream().map(AuditLogEntity::getCostUsd).filter(Objects::nonNull).mapToDouble(Double::doubleValue).sum();
-        double averageTokensPerRequest = filtered.isEmpty() ? 0.0d : (double) totalTokens / filtered.size();
-        double averageCostUsdPerRequest = filtered.isEmpty() ? 0.0d : totalCostUsd / filtered.size();
 
         List<AdminUsageMetricsItem.ProviderUsageBreakdownItem> breakdown = filtered.stream()
                 .collect(Collectors.groupingBy(entity -> safeLower(entity.getProvider()) + "|" + safeLower(entity.getModel())))
@@ -165,16 +170,16 @@ public class AdminUsageMetricsService {
                 tenantId,
                 effectiveSinceHours,
                 bucketUnit,
-                filtered.size(),
-                successCount,
-                blockedCount,
-                totalToolCalls,
-                totalInputTokens,
-                totalOutputTokens,
-                totalTokens,
-                totalCostUsd,
-                averageTokensPerRequest,
-                averageCostUsdPerRequest,
+                currentSummary.totalRequests(),
+                currentSummary.successCount(),
+                currentSummary.blockedCount(),
+                currentSummary.totalToolCalls(),
+                currentSummary.totalInputTokens(),
+                currentSummary.totalOutputTokens(),
+                currentSummary.totalTokens(),
+                currentSummary.totalCostUsd(),
+                currentSummary.averageTokensPerRequest(),
+                currentSummary.averageCostUsdPerRequest(),
                 breakdown,
                 providerBreakdown,
                 modelBreakdown,
@@ -183,8 +188,28 @@ public class AdminUsageMetricsService {
                 toolBreakdown,
                 blockedReasonBreakdown,
                 ruleCodeBreakdown,
+                new AdminUsageMetricsItem.ComparisonItem(
+                        previousSummary.totalRequests(),
+                        previousSummary.successCount(),
+                        previousSummary.blockedCount(),
+                        previousSummary.totalTokens(),
+                        previousSummary.totalCostUsd(),
+                        currentSummary.totalRequests() - previousSummary.totalRequests(),
+                        currentSummary.successCount() - previousSummary.successCount(),
+                        currentSummary.blockedCount() - previousSummary.blockedCount(),
+                        currentSummary.totalTokens() - previousSummary.totalTokens(),
+                        currentSummary.totalCostUsd() - previousSummary.totalCostUsd()
+                ),
                 timeSeries
         );
+    }
+
+    private List<AuditLogEntity> filterEntities(List<AuditLogEntity> entities, String provider, String model, String tool) {
+        return entities.stream()
+                .filter(entity -> provider == null || provider.isBlank() || provider.equalsIgnoreCase(entity.getProvider()))
+                .filter(entity -> model == null || model.isBlank() || Objects.equals(model.toLowerCase(), safeLower(entity.getModel())))
+                .filter(entity -> tool == null || tool.isBlank() || containsTool(entity.getToolNames(), tool))
+                .toList();
     }
 
     private String safeLower(String value) {
@@ -260,6 +285,44 @@ public class AdminUsageMetricsService {
             String status,
             Integer totalTokens,
             Double costUsd
+    ) {
+    }
+
+    private MetricsSummary summarizeMetrics(List<AuditLogEntity> entities) {
+        long successCount = entities.stream().filter(entity -> "SUCCESS".equalsIgnoreCase(entity.getStatus())).count();
+        long blockedCount = entities.stream().filter(entity -> "BLOCKED".equalsIgnoreCase(entity.getStatus())).count();
+        long totalToolCalls = entities.stream().mapToLong(AuditLogEntity::getToolCallCount).sum();
+        long totalInputTokens = entities.stream().map(AuditLogEntity::getInputTokens).filter(Objects::nonNull).mapToLong(Integer::longValue).sum();
+        long totalOutputTokens = entities.stream().map(AuditLogEntity::getOutputTokens).filter(Objects::nonNull).mapToLong(Integer::longValue).sum();
+        long totalTokens = entities.stream().map(AuditLogEntity::getTotalTokens).filter(Objects::nonNull).mapToLong(Integer::longValue).sum();
+        double totalCostUsd = entities.stream().map(AuditLogEntity::getCostUsd).filter(Objects::nonNull).mapToDouble(Double::doubleValue).sum();
+        double averageTokensPerRequest = entities.isEmpty() ? 0.0d : (double) totalTokens / entities.size();
+        double averageCostUsdPerRequest = entities.isEmpty() ? 0.0d : totalCostUsd / entities.size();
+        return new MetricsSummary(
+                entities.size(),
+                successCount,
+                blockedCount,
+                totalToolCalls,
+                totalInputTokens,
+                totalOutputTokens,
+                totalTokens,
+                totalCostUsd,
+                averageTokensPerRequest,
+                averageCostUsdPerRequest
+        );
+    }
+
+    private record MetricsSummary(
+            long totalRequests,
+            long successCount,
+            long blockedCount,
+            long totalToolCalls,
+            long totalInputTokens,
+            long totalOutputTokens,
+            long totalTokens,
+            double totalCostUsd,
+            double averageTokensPerRequest,
+            double averageCostUsdPerRequest
     ) {
     }
 }

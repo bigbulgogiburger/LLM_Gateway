@@ -268,6 +268,30 @@ class AdminControllerTest {
                 "time",
                 now.minus(1, ChronoUnit.HOURS)
         ));
+        auditLogRepository.save(new AuditLogEntity(
+                "req-metrics-prev-1",
+                "tenant-default",
+                "local-operator",
+                "user-010",
+                "OPERATOR",
+                "openai",
+                "gpt-4.1-mini",
+                "SUCCESS",
+                true,
+                "SAFE",
+                true,
+                false,
+                "",
+                1,
+                "lookup_weather",
+                70,
+                30,
+                100,
+                0.002d,
+                70,
+                "previous-window",
+                now.minus(30, ChronoUnit.HOURS)
+        ));
 
         mockMvc.perform(get("/api/admin/metrics/usage")
                         .header("X-API-Key", "local-admin-api-key")
@@ -301,6 +325,16 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$.blockedReasonBreakdown[0].requests").value(1))
                 .andExpect(jsonPath("$.ruleCodeBreakdown[0].key").value("OUTPUT_MODERATION_BLOCKED"))
                 .andExpect(jsonPath("$.ruleCodeBreakdown[0].blockedCount").value(1))
+                .andExpect(jsonPath("$.comparison.previousTotalRequests").value(1))
+                .andExpect(jsonPath("$.comparison.previousSuccessCount").value(1))
+                .andExpect(jsonPath("$.comparison.previousBlockedCount").value(0))
+                .andExpect(jsonPath("$.comparison.previousTotalTokens").value(100))
+                .andExpect(jsonPath("$.comparison.previousTotalCostUsd").value(0.002d))
+                .andExpect(jsonPath("$.comparison.requestDelta").value(1))
+                .andExpect(jsonPath("$.comparison.successDelta").value(0))
+                .andExpect(jsonPath("$.comparison.blockedDelta").value(1))
+                .andExpect(jsonPath("$.comparison.tokenDelta").value(100))
+                .andExpect(jsonPath("$.comparison.costDeltaUsd").value(0.002d))
                 .andExpect(jsonPath("$.timeSeries.length()").value(2))
                 .andExpect(jsonPath("$.timeSeries[0].requests").value(1))
                 .andExpect(jsonPath("$.timeSeries[0].totalTokens").value(150))
@@ -376,6 +410,8 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$.toolBreakdown.length()").value(2))
                 .andExpect(jsonPath("$.blockedReasonBreakdown.length()").value(0))
                 .andExpect(jsonPath("$.ruleCodeBreakdown.length()").value(0))
+                .andExpect(jsonPath("$.comparison.previousTotalRequests").value(0))
+                .andExpect(jsonPath("$.comparison.requestDelta").value(2))
                 .andExpect(jsonPath("$.timeSeries.length()").value(2))
                 .andExpect(jsonPath("$.timeSeries[0].requests").value(1))
                 .andExpect(jsonPath("$.timeSeries[1].requests").value(1));
