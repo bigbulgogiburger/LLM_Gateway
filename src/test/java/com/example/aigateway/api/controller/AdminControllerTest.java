@@ -479,6 +479,30 @@ class AdminControllerTest {
                 "overview-blocked",
                 now.minus(30, ChronoUnit.MINUTES)
         ));
+        auditLogRepository.save(new AuditLogEntity(
+                "req-dashboard-3",
+                "tenant-default",
+                "client-a",
+                "user-c",
+                "OPERATOR",
+                "mock",
+                "mock-gateway",
+                "SUCCESS",
+                true,
+                "SAFE",
+                true,
+                false,
+                "",
+                1,
+                "lookup_time",
+                20,
+                10,
+                30,
+                0.0005d,
+                30,
+                "overview-mock",
+                now.minus(2, ChronoUnit.HOURS)
+        ));
 
         mockMvc.perform(get("/api/admin/dashboard/overview")
                         .header("X-API-Key", "local-admin-api-key")
@@ -487,14 +511,25 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$.tenantId").value("tenant-default"))
                 .andExpect(jsonPath("$.sinceHours").value(24))
                 .andExpect(jsonPath("$.activeClientCount").value(2))
-                .andExpect(jsonPath("$.activeUserCount").value(2))
+                .andExpect(jsonPath("$.activeUserCount").value(3))
                 .andExpect(jsonPath("$.blockedRequestCount").value(1))
                 .andExpect(jsonPath("$.anomalyCount").value(1))
-                .andExpect(jsonPath("$.usage.totalRequests").value(2))
+                .andExpect(jsonPath("$.successRate").value(org.hamcrest.Matchers.closeTo(66.666d, 0.01d)))
+                .andExpect(jsonPath("$.blockedRate").value(org.hamcrest.Matchers.closeTo(33.333d, 0.01d)))
+                .andExpect(jsonPath("$.costPer1kTokens").value(0.032352941176470584d))
+                .andExpect(jsonPath("$.lastRequestAt").exists())
+                .andExpect(jsonPath("$.usage.totalRequests").value(3))
                 .andExpect(jsonPath("$.usage.anomalyFlags[0].code").value("BLOCKED_SPIKE"))
+                .andExpect(jsonPath("$.topProviders[0].key").value("openai"))
+                .andExpect(jsonPath("$.topModels[0].key").value("gpt-4.1-mini"))
+                .andExpect(jsonPath("$.topClients[0].key").value("client-a"))
+                .andExpect(jsonPath("$.topUsers.length()").value(3))
+                .andExpect(jsonPath("$.topBlockedReasons[0].key").value("OUTPUT_MODERATION_BLOCKED"))
                 .andExpect(jsonPath("$.recentBlocked[0].requestId").value("req-dashboard-2"))
                 .andExpect(jsonPath("$.recentBlocked[0].reasonCode").value("OUTPUT_MODERATION_BLOCKED"))
-                .andExpect(jsonPath("$.recentBlocked[0].clientId").value("client-b"));
+                .andExpect(jsonPath("$.recentBlocked[0].clientId").value("client-b"))
+                .andExpect(jsonPath("$.recentCostly[0].requestId").value("req-dashboard-1"))
+                .andExpect(jsonPath("$.recentCostly[1].requestId").value("req-dashboard-2"));
     }
 
     @Test

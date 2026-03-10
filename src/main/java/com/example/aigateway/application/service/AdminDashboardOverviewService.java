@@ -49,6 +49,32 @@ public class AdminDashboardOverviewService {
                 ))
                 .toList();
 
+        List<AdminDashboardOverviewItem.RecentCostlyItem> recentCostly = recentLogs.stream()
+                .filter(entity -> entity.getCostUsd() != null)
+                .sorted(Comparator.comparing(AuditLogEntity::getCostUsd, Comparator.nullsLast(Comparator.reverseOrder()))
+                        .thenComparing(AuditLogEntity::getCreatedAt, Comparator.reverseOrder()))
+                .limit(5)
+                .map(entity -> new AdminDashboardOverviewItem.RecentCostlyItem(
+                        entity.getRequestId(),
+                        entity.getClientId(),
+                        entity.getUserId(),
+                        entity.getProvider(),
+                        entity.getModel(),
+                        entity.getTotalTokens() == null ? 0 : entity.getTotalTokens(),
+                        entity.getCostUsd() == null ? 0.0d : entity.getCostUsd(),
+                        entity.getCreatedAt().toString()
+                ))
+                .toList();
+
+        double successRate = usage.totalRequests() == 0 ? 0.0d : ((double) usage.successCount() / usage.totalRequests()) * 100.0d;
+        double blockedRate = usage.totalRequests() == 0 ? 0.0d : ((double) usage.blockedCount() / usage.totalRequests()) * 100.0d;
+        double costPer1kTokens = usage.totalTokens() == 0 ? 0.0d : (usage.totalCostUsd() / usage.totalTokens()) * 1000.0d;
+        String lastRequestAt = recentLogs.stream()
+                .map(AuditLogEntity::getCreatedAt)
+                .max(Instant::compareTo)
+                .map(Instant::toString)
+                .orElse(null);
+
         return new AdminDashboardOverviewItem(
                 tenantId,
                 effectiveSinceHours,
@@ -56,9 +82,26 @@ public class AdminDashboardOverviewService {
                 recentLogs.stream().map(AuditLogEntity::getUserId).filter(Objects::nonNull).distinct().count(),
                 recentBlocked.size(),
                 usage.anomalyFlags().size(),
+                successRate,
+                blockedRate,
+                costPer1kTokens,
+                lastRequestAt,
                 usage,
-                recentBlocked
+                limitBreakdown(usage.providerBreakdown(), 3),
+                limitBreakdown(usage.modelBreakdown(), 3),
+                limitBreakdown(usage.clientBreakdown(), 3),
+                limitBreakdown(usage.userBreakdown(), 3),
+                limitBreakdown(usage.blockedReasonBreakdown(), 3),
+                recentBlocked,
+                recentCostly
         );
+    }
+
+    private List<AdminUsageMetricsItem.DimensionBreakdownItem> limitBreakdown(
+            List<AdminUsageMetricsItem.DimensionBreakdownItem> items,
+            int limit
+    ) {
+        return items.stream().limit(limit).toList();
     }
 
     private String firstReasonCode(String ruleCodes) {
