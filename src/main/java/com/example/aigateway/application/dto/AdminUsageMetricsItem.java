@@ -19,6 +19,8 @@ public record AdminUsageMetricsItem(
         List<ProviderUsageBreakdownItem> breakdown,
         List<DimensionBreakdownItem> providerBreakdown,
         List<DimensionBreakdownItem> modelBreakdown,
+        List<DimensionBreakdownItem> clientBreakdown,
+        List<DimensionBreakdownItem> userBreakdown,
         List<DimensionBreakdownItem> toolBreakdown,
         List<DimensionBreakdownItem> blockedReasonBreakdown,
         List<DimensionBreakdownItem> ruleCodeBreakdown,

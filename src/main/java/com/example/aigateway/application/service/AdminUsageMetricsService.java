@@ -98,6 +98,14 @@ public class AdminUsageMetricsService {
                 filtered,
                 entity -> entity.getModel() == null ? "unknown" : entity.getModel()
         );
+        List<AdminUsageMetricsItem.DimensionBreakdownItem> clientBreakdown = buildDimensionBreakdown(
+                filtered,
+                AuditLogEntity::getClientId
+        );
+        List<AdminUsageMetricsItem.DimensionBreakdownItem> userBreakdown = buildDimensionBreakdown(
+                filtered,
+                AuditLogEntity::getUserId
+        );
         List<AdminUsageMetricsItem.DimensionBreakdownItem> toolBreakdown = filtered.stream()
                 .flatMap(entity -> extractTools(entity.getToolNames()).stream()
                         .map(toolName -> new ToolMetricSource(
@@ -170,6 +178,8 @@ public class AdminUsageMetricsService {
                 breakdown,
                 providerBreakdown,
                 modelBreakdown,
+                clientBreakdown,
+                userBreakdown,
                 toolBreakdown,
                 blockedReasonBreakdown,
                 ruleCodeBreakdown,
