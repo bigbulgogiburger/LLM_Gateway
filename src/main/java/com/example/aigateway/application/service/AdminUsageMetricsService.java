@@ -165,6 +165,7 @@ public class AdminUsageMetricsService {
                 .sorted(Comparator.comparingLong(AdminUsageMetricsItem.DimensionBreakdownItem::requests).reversed()
                         .thenComparing(AdminUsageMetricsItem.DimensionBreakdownItem::key))
                 .toList();
+        List<AdminUsageMetricsItem.DimensionRegressionItem> topRegressions = buildTopRegressions(currentWindow, previousWindow);
         AdminUsageMetricsItem.ComparisonItem comparison = new AdminUsageMetricsItem.ComparisonItem(
                 previousSummary.totalRequests(),
                 previousSummary.successCount(),
@@ -201,6 +202,7 @@ public class AdminUsageMetricsService {
                 toolBreakdown,
                 blockedReasonBreakdown,
                 ruleCodeBreakdown,
+                topRegressions,
                 comparison,
                 anomalyFlags,
                 timeSeries
@@ -283,6 +285,72 @@ public class AdminUsageMetricsService {
         return value == null || value.isBlank() ? "unknown" : value;
     }
 
+    private List<AdminUsageMetricsItem.DimensionRegressionItem> buildTopRegressions(
+            List<AuditLogEntity> currentWindow,
+            List<AuditLogEntity> previousWindow
+    ) {
+        return java.util.stream.Stream.of(
+                        buildRegressionItems("provider", currentWindow, previousWindow, AuditLogEntity::getProvider),
+                        buildRegressionItems("model", currentWindow, previousWindow, entity -> entity.getModel() == null ? "unknown" : entity.getModel()),
+                        buildRegressionItems("client", currentWindow, previousWindow, AuditLogEntity::getClientId),
+                        buildRegressionItems("tool", currentWindow, previousWindow, null)
+                )
+                .flatMap(List::stream)
+                .sorted(Comparator.comparingLong(AdminUsageMetricsItem.DimensionRegressionItem::requestDelta).reversed()
+                        .thenComparingLong(AdminUsageMetricsItem.DimensionRegressionItem::blockedDelta).reversed()
+                        .thenComparing(AdminUsageMetricsItem.DimensionRegressionItem::dimension)
+                        .thenComparing(AdminUsageMetricsItem.DimensionRegressionItem::key))
+                .limit(8)
+                .toList();
+    }
+
+    private List<AdminUsageMetricsItem.DimensionRegressionItem> buildRegressionItems(
+            String dimension,
+            List<AuditLogEntity> currentWindow,
+            List<AuditLogEntity> previousWindow,
+            java.util.function.Function<AuditLogEntity, String> keyExtractor
+    ) {
+        java.util.Map<String, MetricsSummary> current = summarizeByDimension(currentWindow, keyExtractor, "tool".equals(dimension));
+        java.util.Map<String, MetricsSummary> previous = summarizeByDimension(previousWindow, keyExtractor, "tool".equals(dimension));
+        return current.entrySet().stream()
+                .map(entry -> {
+                    MetricsSummary previousSummary = previous.getOrDefault(entry.getKey(), MetricsSummary.empty());
+                    MetricsSummary currentSummary = entry.getValue();
+                    return new AdminUsageMetricsItem.DimensionRegressionItem(
+                            dimension,
+                            entry.getKey(),
+                            currentSummary.totalRequests() - previousSummary.totalRequests(),
+                            currentSummary.blockedCount() - previousSummary.blockedCount(),
+                            currentSummary.totalTokens() - previousSummary.totalTokens(),
+                            currentSummary.totalCostUsd() - previousSummary.totalCostUsd()
+                    );
+                })
+                .filter(item -> item.requestDelta() > 0 || item.blockedDelta() > 0 || item.tokenDelta() > 0 || item.costDeltaUsd() > 0.0d)
+                .toList();
+    }
+
+    private java.util.Map<String, MetricsSummary> summarizeByDimension(
+            List<AuditLogEntity> entities,
+            java.util.function.Function<AuditLogEntity, String> keyExtractor,
+            boolean toolDimension
+    ) {
+        if (toolDimension) {
+            return entities.stream()
+                    .flatMap(entity -> extractTools(entity.getToolNames()).stream()
+                            .map(tool -> java.util.Map.entry(tool, entity)))
+                    .collect(Collectors.groupingBy(
+                            java.util.Map.Entry::getKey,
+                            Collectors.mapping(java.util.Map.Entry::getValue, Collectors.toList())
+                    ))
+                    .entrySet().stream()
+                    .collect(Collectors.toMap(java.util.Map.Entry::getKey, entry -> summarizeMetrics(entry.getValue())));
+        }
+        return entities.stream()
+                .collect(Collectors.groupingBy(entity -> safeDimensionKey(keyExtractor.apply(entity))))
+                .entrySet().stream()
+                .collect(Collectors.toMap(java.util.Map.Entry::getKey, entry -> summarizeMetrics(entry.getValue())));
+    }
+
     private List<AdminUsageMetricsItem.AnomalyFlagItem> detectAnomalies(MetricsSummary currentSummary, MetricsSummary previousSummary) {
         java.util.ArrayList<AdminUsageMetricsItem.AnomalyFlagItem> flags = new java.util.ArrayList<>();
 
@@ -354,5 +422,8 @@ public class AdminUsageMetricsService {
             double averageTokensPerRequest,
             double averageCostUsdPerRequest
     ) {
+        private static MetricsSummary empty() {
+            return new MetricsSummary(0, 0, 0, 0, 0, 0, 0, 0.0d, 0.0d, 0.0d);
+        }
     }
 }

@@ -21,18 +21,23 @@ public class AuditSearchService {
         this.dataSource = dataSource;
     }
 
-    public List<AuditSearchItem> search(String tenantId, String query, String provider, String model, String tool) {
+    public List<AuditSearchItem> search(String tenantId, String query, String provider, String model, String tool, String status, String clientId) {
         String normalizedQuery = query == null ? "" : query.trim();
         String normalizedProvider = provider == null ? "" : provider.trim();
         String normalizedModel = model == null ? "" : model.trim();
         String normalizedTool = tool == null ? "" : tool.trim();
-        if (normalizedQuery.isEmpty() && normalizedProvider.isEmpty() && normalizedModel.isEmpty() && normalizedTool.isEmpty()) {
+        String normalizedStatus = status == null ? "" : status.trim();
+        String normalizedClientId = clientId == null ? "" : clientId.trim();
+        if (normalizedQuery.isEmpty() && normalizedProvider.isEmpty() && normalizedModel.isEmpty() && normalizedTool.isEmpty()
+                && normalizedStatus.isEmpty() && normalizedClientId.isEmpty()) {
             return List.of();
         }
 
         return searchEntities(tenantId, normalizedQuery).stream()
                 .filter(entity -> normalizedProvider.isEmpty() || normalizedProvider.equalsIgnoreCase(entity.getProvider()))
                 .filter(entity -> normalizedModel.isEmpty() || normalizedModel.equalsIgnoreCase(entity.getModel()))
+                .filter(entity -> normalizedStatus.isEmpty() || normalizedStatus.equalsIgnoreCase(entity.getStatus()))
+                .filter(entity -> normalizedClientId.isEmpty() || normalizedClientId.equalsIgnoreCase(entity.getClientId()))
                 .filter(entity -> normalizedTool.isEmpty() || splitToolNames(entity.getToolNames()).stream()
                         .anyMatch(toolName -> toolName.equalsIgnoreCase(normalizedTool)))
                 .map(this::toItem)

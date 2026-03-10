@@ -112,9 +112,11 @@ public class AdminController {
             @RequestParam(required = false) String provider,
             @RequestParam(required = false) String model,
             @RequestParam(required = false) String tool,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String clientId,
             @AuthenticationPrincipal GatewayPrincipal principal
     ) {
-        return auditSearchService.search(principal.tenantId(), q, provider, model, tool);
+        return auditSearchService.search(principal.tenantId(), q, provider, model, tool, status, clientId);
     }
 
     @GetMapping("/audits/{requestId}")

@@ -119,7 +119,7 @@ class DockerComposeGatewayIntegrationTest {
                 Instant.now()
         ));
 
-        assertThat(auditSearchService.search("tenant-default", "\"credential dump\"", null, null, null))
+        assertThat(auditSearchService.search("tenant-default", "\"credential dump\"", null, null, null, null, null))
                 .extracting("requestId")
                 .contains("req-it-1");
     }

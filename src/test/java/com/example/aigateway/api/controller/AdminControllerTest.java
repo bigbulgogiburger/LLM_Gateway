@@ -155,7 +155,9 @@ class AdminControllerTest {
                         .header("X-API-Key", "local-admin-api-key")
                         .queryParam("provider", "mock")
                         .queryParam("model", "gpt-4.1-mini")
-                        .queryParam("tool", "lookup_time"))
+                        .queryParam("tool", "lookup_time")
+                        .queryParam("status", "BLOCKED")
+                        .queryParam("clientId", "local-operator"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$[0].requestId").value("req-admin-search-1"));
     }
@@ -332,6 +334,9 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$.blockedReasonBreakdown[0].requests").value(1))
                 .andExpect(jsonPath("$.ruleCodeBreakdown[0].key").value("OUTPUT_MODERATION_BLOCKED"))
                 .andExpect(jsonPath("$.ruleCodeBreakdown[0].blockedCount").value(1))
+                .andExpect(jsonPath("$.topRegressions[0].dimension").value("client"))
+                .andExpect(jsonPath("$.topRegressions[0].key").value("local-operator"))
+                .andExpect(jsonPath("$.topRegressions[0].requestDelta").value(1))
                 .andExpect(jsonPath("$.comparison.previousTotalRequests").value(1))
                 .andExpect(jsonPath("$.comparison.previousSuccessCount").value(1))
                 .andExpect(jsonPath("$.comparison.previousBlockedCount").value(0))
