@@ -11,6 +11,7 @@ import com.example.aigateway.infrastructure.audit.AuditSearchEntity;
 import com.example.aigateway.infrastructure.audit.AuditSearchRepository;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.DisplayName;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -31,6 +32,12 @@ class AdminControllerTest {
 
     @Autowired
     private AuditLogRepository auditLogRepository;
+
+    @BeforeEach
+    void clearRepositories() {
+        auditSearchRepository.deleteAll();
+        auditLogRepository.deleteAll();
+    }
 
     @Test
     @DisplayName("관리자 정책 override는 저장 후 조회할 수 있다")
@@ -418,6 +425,76 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$.timeSeries.length()").value(2))
                 .andExpect(jsonPath("$.timeSeries[0].requests").value(1))
                 .andExpect(jsonPath("$.timeSeries[1].requests").value(1));
+    }
+
+    @Test
+    @DisplayName("관리자는 dashboard overview를 조회할 수 있다")
+    void getsDashboardOverview() throws Exception {
+        Instant now = Instant.now().truncatedTo(ChronoUnit.HOURS);
+        auditLogRepository.save(new AuditLogEntity(
+                "req-dashboard-1",
+                "tenant-default",
+                "client-a",
+                "user-a",
+                "OPERATOR",
+                "openai",
+                "gpt-4.1-mini",
+                "SUCCESS",
+                true,
+                "SAFE",
+                true,
+                false,
+                "",
+                1,
+                "lookup_weather",
+                80,
+                20,
+                100,
+                0.004d,
+                50,
+                "overview-success",
+                now.minus(1, ChronoUnit.HOURS)
+        ));
+        auditLogRepository.save(new AuditLogEntity(
+                "req-dashboard-2",
+                "tenant-default",
+                "client-b",
+                "user-b",
+                "OPERATOR",
+                "openai",
+                "gpt-4.1-mini",
+                "BLOCKED",
+                false,
+                "SAFE",
+                true,
+                false,
+                "OUTPUT_MODERATION_BLOCKED",
+                0,
+                "",
+                30,
+                10,
+                40,
+                0.001d,
+                40,
+                "overview-blocked",
+                now.minus(30, ChronoUnit.MINUTES)
+        ));
+
+        mockMvc.perform(get("/api/admin/dashboard/overview")
+                        .header("X-API-Key", "local-admin-api-key")
+                        .queryParam("sinceHours", "24"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.tenantId").value("tenant-default"))
+                .andExpect(jsonPath("$.sinceHours").value(24))
+                .andExpect(jsonPath("$.activeClientCount").value(2))
+                .andExpect(jsonPath("$.activeUserCount").value(2))
+                .andExpect(jsonPath("$.blockedRequestCount").value(1))
+                .andExpect(jsonPath("$.anomalyCount").value(1))
+                .andExpect(jsonPath("$.usage.totalRequests").value(2))
+                .andExpect(jsonPath("$.usage.anomalyFlags[0].code").value("BLOCKED_SPIKE"))
+                .andExpect(jsonPath("$.recentBlocked[0].requestId").value("req-dashboard-2"))
+                .andExpect(jsonPath("$.recentBlocked[0].reasonCode").value("OUTPUT_MODERATION_BLOCKED"))
+                .andExpect(jsonPath("$.recentBlocked[0].clientId").value("client-b"));
     }
 
     @Test

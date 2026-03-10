@@ -1,5 +1,6 @@
 package com.example.aigateway.api.controller;
 
+import com.example.aigateway.application.dto.AdminDashboardOverviewItem;
 import com.example.aigateway.application.dto.AdminUsageMetricsItem;
 import com.example.aigateway.application.dto.AuditDetailItem;
 import com.example.aigateway.application.dto.AuditSearchItem;
@@ -8,6 +9,7 @@ import com.example.aigateway.api.response.ProviderCapabilityView;
 import com.example.aigateway.application.service.AuditSearchService;
 import com.example.aigateway.application.service.AuditDetailService;
 import com.example.aigateway.application.service.AdminUsageMetricsService;
+import com.example.aigateway.application.service.AdminDashboardOverviewService;
 import com.example.aigateway.common.exception.GatewayErrorCodes;
 import com.example.aigateway.common.exception.GatewayException;
 import com.example.aigateway.domain.guardrail.result.ResolvedGuardrailPolicy;
@@ -35,6 +37,7 @@ public class AdminController {
     private final AuditSearchService auditSearchService;
     private final AuditDetailService auditDetailService;
     private final AdminUsageMetricsService adminUsageMetricsService;
+    private final AdminDashboardOverviewService adminDashboardOverviewService;
     private final GuardrailPolicyResolver guardrailPolicyResolver;
     private final ProviderRouter providerRouter;
 
@@ -43,6 +46,7 @@ public class AdminController {
             AuditSearchService auditSearchService,
             AuditDetailService auditDetailService,
             AdminUsageMetricsService adminUsageMetricsService,
+            AdminDashboardOverviewService adminDashboardOverviewService,
             GuardrailPolicyResolver guardrailPolicyResolver,
             ProviderRouter providerRouter
     ) {
@@ -50,6 +54,7 @@ public class AdminController {
         this.auditSearchService = auditSearchService;
         this.auditDetailService = auditDetailService;
         this.adminUsageMetricsService = adminUsageMetricsService;
+        this.adminDashboardOverviewService = adminDashboardOverviewService;
         this.guardrailPolicyResolver = guardrailPolicyResolver;
         this.providerRouter = providerRouter;
     }
@@ -129,6 +134,14 @@ public class AdminController {
             @AuthenticationPrincipal GatewayPrincipal principal
     ) {
         return adminUsageMetricsService.summarize(principal.tenantId(), provider, model, tool, sinceHours);
+    }
+
+    @GetMapping("/dashboard/overview")
+    public AdminDashboardOverviewItem getDashboardOverview(
+            @RequestParam(required = false) Integer sinceHours,
+            @AuthenticationPrincipal GatewayPrincipal principal
+    ) {
+        return adminDashboardOverviewService.getOverview(principal.tenantId(), sinceHours);
     }
 
     @GetMapping("/providers")
