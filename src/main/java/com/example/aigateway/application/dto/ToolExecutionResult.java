@@ -5,6 +5,8 @@ public record ToolExecutionResult(
         String toolName,
         String argumentsSummary,
         String output,
-        long durationMillis
+        long durationMillis,
+        int attempts,
+        boolean truncated
 ) {
 }

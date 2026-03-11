@@ -12,6 +12,8 @@ spring:
 gateway:
   tools:
     execution-timeout-millis: 2000
+    retry-attempts: 1
+    output-preview-max-chars: 300
   moderation:
     input:
       enabled: true

@@ -4,6 +4,7 @@ import com.example.aigateway.domain.tool.ExecutableTool;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.List;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -43,5 +44,15 @@ public class LookupTimeTool implements ExecutableTool {
         result.put("timezone", timezone);
         result.put("currentTime", "2026-03-08T12:00:00");
         return result;
+    }
+
+    @Override
+    public List<String> allowedRoles() {
+        return List.of("OPERATOR", "ADMIN");
+    }
+
+    @Override
+    public boolean isRetryable(Throwable throwable) {
+        return true;
     }
 }

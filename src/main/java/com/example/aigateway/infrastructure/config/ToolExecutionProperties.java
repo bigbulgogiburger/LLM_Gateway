@@ -4,6 +4,8 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 
 @ConfigurationProperties(prefix = "gateway.tools")
 public record ToolExecutionProperties(
-        int executionTimeoutMillis
+        int executionTimeoutMillis,
+        int retryAttempts,
+        int outputPreviewMaxChars
 ) {
 }

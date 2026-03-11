@@ -242,7 +242,11 @@ public class AiGatewayService {
         }
 
         SseEmitter emitter = new SseEmitter(30_000L);
-        CompletableFuture.runAsync(() -> streamWithProvider(emitter, request, principal, provider));
+        StreamLifecycle lifecycle = new StreamLifecycle();
+        emitter.onTimeout(lifecycle::markTerminated);
+        emitter.onCompletion(lifecycle::markTerminated);
+        emitter.onError(ignored -> lifecycle.markTerminated());
+        CompletableFuture.runAsync(() -> streamWithProvider(emitter, request, principal, provider, lifecycle));
         return emitter;
     }
 
@@ -352,9 +356,18 @@ public class AiGatewayService {
         return sanitized.substring(0, 40) + "...";
     }
 
-    private void streamWithProvider(SseEmitter emitter, AiChatRequest request, GatewayPrincipal principal, LlmProvider provider) {
+    private void streamWithProvider(
+            SseEmitter emitter,
+            AiChatRequest request,
+            GatewayPrincipal principal,
+            LlmProvider provider,
+            StreamLifecycle lifecycle
+    ) {
         try {
             Instant startedAt = Instant.now();
+            if (lifecycle.isTerminated()) {
+                return;
+            }
             if (!principal.allowsProvider(request.provider())) {
                 throw new GatewayException(
                         GatewayErrorCodes.PROVIDER_NOT_ALLOWED,
@@ -416,7 +429,7 @@ public class AiGatewayService {
 
             if (request.tools() != null && !request.tools().isEmpty()) {
                 ProviderResult initialResult = providerExecutionService.execute(() -> provider.generate(command));
-                streamToolLoop(emitter, command, principal, provider, initialResult, startedAt, ruleDecision, inputModeration, aiAssessment);
+                streamToolLoop(emitter, command, principal, provider, initialResult, startedAt, ruleDecision, inputModeration, aiAssessment, lifecycle);
                 return;
             }
 
@@ -442,9 +455,13 @@ public class AiGatewayService {
                     aiAssessment,
                     usageRef,
                     modelRef,
-                    true
+                    true,
+                    lifecycle
             ));
 
+            if (lifecycle.isTerminated()) {
+                return;
+            }
             if (blocked.get()) {
                 recordBlockedStreamOutcome(command, provider, startedAt, blockedResponse.get(), toolCalls, modelRef.get(), usageRef.get());
                 return;
@@ -475,9 +492,9 @@ public class AiGatewayService {
             auditLogService.log(toAuditEvent(command, successResponse, elapsedMillis, toolCalls, modelRef.get(), usageRef.get()));
             gatewayMetricsService.recordOutcome(provider.name(), "success_stream", command.tenantId());
             gatewayMetricsService.recordLatency(provider.name(), "success_stream", command.tenantId(), elapsedMillis);
-            emitter.complete();
+            completeEmitter(emitter, lifecycle);
         } catch (Exception exception) {
-            emitter.completeWithError(exception);
+            completeEmitterWithError(emitter, lifecycle, exception);
         }
     }
 
@@ -496,12 +513,17 @@ public class AiGatewayService {
             AiGuardrailAssessment aiAssessment,
             AtomicReference<ProviderUsage> usageRef,
             AtomicReference<String> modelRef,
-            boolean emitDoneEvent
+            boolean emitDoneEvent,
+            StreamLifecycle lifecycle
     ) {
         try {
+            if (lifecycle.isTerminated()) {
+                blocked.set(true);
+                return;
+            }
             if ("tool_call".equals(event.type()) && event.toolCall() != null) {
                 toolCalls.add(event.toolCall());
-                emitter.send(SseEmitter.event()
+                sendEvent(emitter, lifecycle, SseEmitter.event()
                         .name("tool_call")
                         .data(new AiChatStreamEvent(
                                 "tool_call",
@@ -559,7 +581,7 @@ public class AiGatewayService {
                 emittedContent.setLength(0);
                 emittedContent.append(safeContent);
                 if (!deltaToEmit.isEmpty()) {
-                    emitter.send(SseEmitter.event()
+                    sendEvent(emitter, lifecycle, SseEmitter.event()
                             .name("chunk")
                             .data(new AiChatStreamEvent(
                                     "chunk",
@@ -581,7 +603,7 @@ public class AiGatewayService {
                 }
             }
             if (emitDoneEvent && "done".equals(event.type())) {
-                emitter.send(SseEmitter.event()
+                sendEvent(emitter, lifecycle, SseEmitter.event()
                         .name("done")
                         .data(new AiChatStreamEvent(
                                 "done",
@@ -594,7 +616,7 @@ public class AiGatewayService {
             }
         } catch (Exception exception) {
             blocked.set(true);
-            emitter.completeWithError(exception);
+            completeEmitterWithError(emitter, lifecycle, exception);
         }
     }
 
@@ -629,6 +651,29 @@ public class AiGatewayService {
         }
     }
 
+    private void sendEvent(SseEmitter emitter, StreamLifecycle lifecycle, SseEmitter.SseEventBuilder event) throws Exception {
+        if (lifecycle.isTerminated()) {
+            return;
+        }
+        emitter.send(event);
+    }
+
+    private void completeEmitter(SseEmitter emitter, StreamLifecycle lifecycle) {
+        if (lifecycle.isTerminated()) {
+            return;
+        }
+        lifecycle.markCompleted();
+        emitter.complete();
+    }
+
+    private void completeEmitterWithError(SseEmitter emitter, StreamLifecycle lifecycle, Exception exception) {
+        if (lifecycle.isTerminated()) {
+            return;
+        }
+        lifecycle.markCompleted();
+        emitter.completeWithError(exception);
+    }
+
     private ProviderExecutionOutcome executeToolLoop(LlmProvider provider, AiGatewayCommand command, GatewayPrincipal principal) {
         ProviderResult result = providerExecutionService.execute(() -> provider.generate(command));
         List<ProviderToolCall> executedToolCalls = new ArrayList<>(result.toolCalls());
@@ -661,7 +706,8 @@ public class AiGatewayService {
             Instant startedAt,
             GuardrailDecision ruleDecision,
             ModerationAssessment inputModeration,
-            AiGuardrailAssessment aiAssessment
+            AiGuardrailAssessment aiAssessment,
+            StreamLifecycle lifecycle
     ) {
         try {
             ProviderResult currentResult = initialResult;
@@ -674,10 +720,13 @@ public class AiGatewayService {
             AtomicReference<String> modelRef = new AtomicReference<>(initialResult.model());
             int remainingIterations = 3;
             while (!currentResult.toolCalls().isEmpty() && remainingIterations-- > 0) {
+                if (lifecycle.isTerminated()) {
+                    return;
+                }
                 executedToolCalls.addAll(currentResult.toolCalls());
                 currentResult.toolCalls().forEach(toolCall -> {
                     try {
-                        emitter.send(SseEmitter.event()
+                        sendEvent(emitter, lifecycle, SseEmitter.event()
                                 .name("tool_call")
                                 .data(new AiChatStreamEvent(
                                         "tool_call",
@@ -709,8 +758,12 @@ public class AiGatewayService {
                         aiAssessment,
                         usageRef,
                         modelRef,
-                        false
+                        false,
+                        lifecycle
                 ));
+                if (lifecycle.isTerminated()) {
+                    return;
+                }
                 if (blocked.get()) {
                     recordBlockedStreamOutcome(command, provider, startedAt, blockedResponse.get(), executedToolCalls, modelRef.get(), usageRef.get());
                     return;
@@ -760,7 +813,7 @@ public class AiGatewayService {
                     return;
                 }
                 emittedContent.append(outputDecision.content());
-                emitter.send(SseEmitter.event()
+                sendEvent(emitter, lifecycle, SseEmitter.event()
                         .name("chunk")
                         .data(new AiChatStreamEvent(
                                 "chunk",
@@ -791,7 +844,7 @@ public class AiGatewayService {
             auditLogService.log(toAuditEvent(command, successResponse, elapsedMillis, executedToolCalls, modelRef.get(), usageRef.get()));
             gatewayMetricsService.recordOutcome(provider.name(), "success_stream", command.tenantId());
             gatewayMetricsService.recordLatency(provider.name(), "success_stream", command.tenantId(), elapsedMillis);
-            emitter.send(SseEmitter.event()
+            sendEvent(emitter, lifecycle, SseEmitter.event()
                     .name("done")
                     .data(new AiChatStreamEvent(
                             "done",
@@ -801,9 +854,9 @@ public class AiGatewayService {
                             null,
                             null
                     )));
-            emitter.complete();
+            completeEmitter(emitter, lifecycle);
         } catch (Exception exception) {
-            emitter.completeWithError(exception);
+            completeEmitterWithError(emitter, lifecycle, exception);
         }
     }
 
@@ -985,5 +1038,24 @@ public class AiGatewayService {
             ProviderResult result,
             List<ProviderToolCall> executedToolCalls
     ) {
+    }
+
+    private static final class StreamLifecycle {
+        private final AtomicBoolean terminated = new AtomicBoolean(false);
+        private final AtomicBoolean completed = new AtomicBoolean(false);
+
+        private boolean isTerminated() {
+            return terminated.get();
+        }
+
+        private void markTerminated() {
+            if (!completed.get()) {
+                terminated.set(true);
+            }
+        }
+
+        private void markCompleted() {
+            completed.set(true);
+        }
     }
 }

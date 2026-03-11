@@ -49,6 +49,7 @@ public class ToolPolicyService {
                         "등록되지 않은 tool 입니다: " + tool.name()
                 );
             }
+            toolExecutionService.validatePrincipalScope(principal, tool.name());
             toolSchemaValidator.validateRequestSchema(tool.name(), toolExecutionService.inputSchema(tool.name()), tool.inputSchema());
         }
         if (toolChoice != null && "function".equalsIgnoreCase(toolChoice.type())

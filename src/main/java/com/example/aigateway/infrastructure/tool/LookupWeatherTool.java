@@ -4,6 +4,7 @@ import com.example.aigateway.domain.tool.ExecutableTool;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.List;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -45,5 +46,15 @@ public class LookupWeatherTool implements ExecutableTool {
         result.put("temperatureCelsius", 23);
         result.put("summary", city + " is sunny and 23C.");
         return result;
+    }
+
+    @Override
+    public List<String> allowedRoles() {
+        return List.of("OPERATOR", "ADMIN");
+    }
+
+    @Override
+    public boolean isRetryable(Throwable throwable) {
+        return true;
     }
 }

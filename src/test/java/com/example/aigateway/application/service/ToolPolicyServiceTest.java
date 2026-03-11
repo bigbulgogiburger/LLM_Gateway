@@ -25,7 +25,7 @@ class ToolPolicyServiceTest {
         ToolExecutionService toolExecutionService = new ToolExecutionService(
                 objectMapper,
                 List.of(new SchemaAwareTool(objectMapper)),
-                new ToolExecutionProperties(2000),
+                new ToolExecutionProperties(2000, 1, 80),
                 new ToolSchemaValidator()
         );
         ToolPolicyService toolPolicyService = new ToolPolicyService(toolExecutionService, new ToolSchemaValidator());
@@ -65,6 +65,47 @@ class ToolPolicyServiceTest {
                 });
     }
 
+    @Test
+    @DisplayName("tool 자체 scope 정책에 맞지 않으면 요청 단계에서 거부된다")
+    void rejectsToolOutsideScope() throws Exception {
+        ToolExecutionService toolExecutionService = new ToolExecutionService(
+                objectMapper,
+                List.of(new AdminScopedTool(objectMapper)),
+                new ToolExecutionProperties(2000, 1, 80),
+                new ToolSchemaValidator()
+        );
+        ToolPolicyService toolPolicyService = new ToolPolicyService(toolExecutionService, new ToolSchemaValidator());
+        GatewayPrincipal principal = new GatewayPrincipal(
+                "test-client",
+                "tenant-test",
+                "OPERATOR",
+                1000,
+                50000,
+                List.of("mock"),
+                List.of(),
+                List.of("admin_scoped_tool")
+        );
+
+        assertThatThrownBy(() -> toolPolicyService.validateRequestedTools(
+                principal,
+                List.of(new AiChatRequest.ToolDefinition(
+                        "function",
+                        "admin_scoped_tool",
+                        "admin scoped tool",
+                        objectMapper.readTree("""
+                                {
+                                  "type": "object",
+                                  "properties": {},
+                                  "required": []
+                                }
+                                """)
+                )),
+                new AiChatRequest.ToolChoice("function", "admin_scoped_tool")
+        ))
+                .isInstanceOf(GatewayException.class)
+                .satisfies(exception -> assertThat(((GatewayException) exception).code()).isEqualTo("FORBIDDEN"));
+    }
+
     private record SchemaAwareTool(ObjectMapper objectMapper) implements ExecutableTool {
         @Override
         public String name() {
@@ -85,6 +126,23 @@ class ToolPolicyServiceTest {
         @Override
         public JsonNode execute(JsonNode arguments) {
             return arguments;
+        }
+    }
+
+    private record AdminScopedTool(ObjectMapper objectMapper) implements ExecutableTool {
+        @Override
+        public String name() {
+            return "admin_scoped_tool";
+        }
+
+        @Override
+        public JsonNode execute(JsonNode arguments) {
+            return objectMapper.createObjectNode().put("ok", true);
+        }
+
+        @Override
+        public List<String> allowedRoles() {
+            return List.of("ADMIN");
         }
     }
 }

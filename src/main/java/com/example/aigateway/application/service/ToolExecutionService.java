@@ -9,6 +9,7 @@ import com.example.aigateway.domain.tool.ExecutableTool;
 import com.example.aigateway.infrastructure.config.ToolExecutionProperties;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
@@ -51,6 +52,38 @@ public class ToolExecutionService {
         return tool == null ? null : tool.inputSchema();
     }
 
+    public void validatePrincipalScope(GatewayPrincipal principal, String toolName) {
+        ExecutableTool tool = toolName == null ? null : toolsByName.get(toolName.toLowerCase());
+        if (tool == null) {
+            throw new GatewayException(
+                    GatewayErrorCodes.VALIDATION_ERROR,
+                    HttpStatus.BAD_REQUEST,
+                    "등록되지 않은 tool 입니다: " + toolName
+            );
+        }
+        if (!isAllowed(principal.role(), tool.allowedRoles())) {
+            throw new GatewayException(
+                    GatewayErrorCodes.FORBIDDEN,
+                    HttpStatus.FORBIDDEN,
+                    "현재 role로는 요청된 tool을 실행할 수 없습니다: " + tool.name()
+            );
+        }
+        if (!isAllowed(principal.clientId(), tool.allowedClients())) {
+            throw new GatewayException(
+                    GatewayErrorCodes.FORBIDDEN,
+                    HttpStatus.FORBIDDEN,
+                    "현재 client로는 요청된 tool을 실행할 수 없습니다: " + tool.name()
+            );
+        }
+        if (!isAllowed(principal.tenantId(), tool.allowedTenants())) {
+            throw new GatewayException(
+                    GatewayErrorCodes.FORBIDDEN,
+                    HttpStatus.FORBIDDEN,
+                    "현재 tenant로는 요청된 tool을 실행할 수 없습니다: " + tool.name()
+            );
+        }
+    }
+
     public List<ToolExecutionResult> execute(GatewayPrincipal principal, List<ProviderToolCall> toolCalls) {
         return toolCalls.stream().map(toolCall -> executeOne(principal, toolCall)).toList();
     }
@@ -71,20 +104,24 @@ public class ToolExecutionService {
                     "등록되지 않은 tool 입니다: " + toolCall.name()
             );
         }
+        validatePrincipalScope(principal, toolCall.name());
         try {
             JsonNode arguments = toolCall.arguments() == null || toolCall.arguments().isBlank()
                     ? objectMapper.createObjectNode()
                     : objectMapper.readTree(toolCall.arguments());
             toolSchemaValidator.validateArguments(tool.name(), tool.inputSchema(), arguments);
             long startedAt = System.nanoTime();
-            JsonNode output = executeWithTimeout(tool, arguments);
+            ToolAttemptOutcome attemptOutcome = executeWithRetry(tool, arguments);
             long durationMillis = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - startedAt);
+            SerializedToolOutput serializedOutput = serializeOutput(attemptOutcome.output());
             return new ToolExecutionResult(
                     toolCall.callId(),
                     toolCall.name(),
                     summarizeArguments(arguments),
-                    objectMapper.writeValueAsString(output),
-                    durationMillis
+                    serializedOutput.payload(),
+                    durationMillis,
+                    attemptOutcome.attempts(),
+                    serializedOutput.truncated()
             );
         } catch (GatewayException exception) {
             throw exception;
@@ -95,6 +132,38 @@ public class ToolExecutionService {
                     "tool 실행에 실패했습니다: " + toolCall.name()
             );
         }
+    }
+
+    private ToolAttemptOutcome executeWithRetry(ExecutableTool tool, JsonNode arguments) {
+        int maxAttempts = Math.max(1, properties.retryAttempts() + 1);
+        int attempts = 0;
+        while (attempts < maxAttempts) {
+            attempts++;
+            try {
+                return new ToolAttemptOutcome(executeWithTimeout(tool, arguments), attempts);
+            } catch (GatewayException exception) {
+                if (exception.status() == HttpStatus.BAD_REQUEST || exception.status() == HttpStatus.FORBIDDEN || !tool.isRetryable(exception)) {
+                    throw exception;
+                }
+                if (attempts >= maxAttempts) {
+                    throw exception;
+                }
+            } catch (CompletionException exception) {
+                Throwable cause = exception.getCause() == null ? exception : exception.getCause();
+                if (!tool.isRetryable(cause) || attempts >= maxAttempts) {
+                    throw exception;
+                }
+            } catch (RuntimeException exception) {
+                if (!tool.isRetryable(exception) || attempts >= maxAttempts) {
+                    throw exception;
+                }
+            }
+        }
+        throw new GatewayException(
+                GatewayErrorCodes.PROVIDER_EXECUTION_FAILED,
+                HttpStatus.BAD_GATEWAY,
+                "tool 실행에 실패했습니다: " + tool.name()
+        );
     }
 
     private JsonNode executeWithTimeout(ExecutableTool tool, JsonNode arguments) {
@@ -121,6 +190,18 @@ public class ToolExecutionService {
         }
     }
 
+    private SerializedToolOutput serializeOutput(JsonNode output) throws Exception {
+        String serialized = objectMapper.writeValueAsString(output);
+        if (serialized.length() <= properties.outputPreviewMaxChars()) {
+            return new SerializedToolOutput(serialized, false);
+        }
+        ObjectNode envelope = objectMapper.createObjectNode();
+        envelope.put("truncated", true);
+        envelope.put("originalLength", serialized.length());
+        envelope.put("contentPreview", serialized.substring(0, properties.outputPreviewMaxChars()) + "...");
+        return new SerializedToolOutput(objectMapper.writeValueAsString(envelope), true);
+    }
+
     private String summarizeArguments(JsonNode arguments) {
         try {
             String json = objectMapper.writeValueAsString(arguments == null ? objectMapper.createObjectNode() : arguments);
@@ -131,5 +212,27 @@ public class ToolExecutionService {
         } catch (Exception exception) {
             return "{}";
         }
+    }
+
+    private boolean isAllowed(String actual, List<String> allowedValues) {
+        if (allowedValues == null || allowedValues.isEmpty()) {
+            return true;
+        }
+        if (actual == null || actual.isBlank()) {
+            return false;
+        }
+        return allowedValues.stream().anyMatch(allowed -> allowed.equalsIgnoreCase(actual));
+    }
+
+    private record ToolAttemptOutcome(
+            JsonNode output,
+            int attempts
+    ) {
+    }
+
+    private record SerializedToolOutput(
+            String payload,
+            boolean truncated
+    ) {
     }
 }
