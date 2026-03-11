@@ -1,6 +1,7 @@
 package com.example.aigateway.infrastructure.audit;
 
 import com.example.aigateway.domain.audit.AuditEvent;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.time.Instant;
 import java.util.Objects;
 import java.util.stream.Collectors;
@@ -12,10 +13,12 @@ public class JpaAuditLogWriter {
 
     private final AuditLogRepository repository;
     private final AuditSearchRepository searchRepository;
+    private final ObjectMapper objectMapper;
 
-    public JpaAuditLogWriter(AuditLogRepository repository, AuditSearchRepository searchRepository) {
+    public JpaAuditLogWriter(AuditLogRepository repository, AuditSearchRepository searchRepository, ObjectMapper objectMapper) {
         this.repository = repository;
         this.searchRepository = searchRepository;
+        this.objectMapper = objectMapper;
     }
 
     public void write(AuditEvent event) {
@@ -41,6 +44,7 @@ public class JpaAuditLogWriter {
                 event.costUsd(),
                 event.elapsedMillis(),
                 event.promptSummary(),
+                serializeToolExecutions(event),
                 Instant.now()
         ));
         searchRepository.save(new AuditSearchEntity(
@@ -75,5 +79,13 @@ public class JpaAuditLogWriter {
                 .map(String::trim)
                 .filter(value -> !value.isEmpty())
                 .collect(Collectors.joining(" "));
+    }
+
+    private String serializeToolExecutions(AuditEvent event) {
+        try {
+            return objectMapper.writeValueAsString(event.toolExecutions() == null ? java.util.List.of() : event.toolExecutions());
+        } catch (Exception exception) {
+            return "[]";
+        }
     }
 }

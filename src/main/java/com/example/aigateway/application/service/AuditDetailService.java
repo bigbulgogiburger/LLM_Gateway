@@ -1,10 +1,13 @@
 package com.example.aigateway.application.service;
 
 import com.example.aigateway.application.dto.AuditDetailItem;
+import com.example.aigateway.application.dto.ToolExecutionAuditItem;
 import com.example.aigateway.common.exception.GatewayErrorCodes;
 import com.example.aigateway.common.exception.GatewayException;
 import com.example.aigateway.infrastructure.audit.AuditLogEntity;
 import com.example.aigateway.infrastructure.audit.AuditLogRepository;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import java.util.Arrays;
 import java.util.List;
 import org.springframework.http.HttpStatus;
@@ -14,9 +17,11 @@ import org.springframework.stereotype.Service;
 public class AuditDetailService {
 
     private final AuditLogRepository auditLogRepository;
+    private final ObjectMapper objectMapper;
 
-    public AuditDetailService(AuditLogRepository auditLogRepository) {
+    public AuditDetailService(AuditLogRepository auditLogRepository, ObjectMapper objectMapper) {
         this.auditLogRepository = auditLogRepository;
+        this.objectMapper = objectMapper;
     }
 
     public AuditDetailItem getByRequestId(String tenantId, String requestId) {
@@ -48,6 +53,7 @@ public class AuditDetailService {
                 entity.getCostUsd(),
                 entity.getElapsedMillis(),
                 entity.getPromptSummary(),
+                parseToolExecutions(entity.getToolExecutionDetails()),
                 entity.getCreatedAt()
         );
     }
@@ -60,5 +66,17 @@ public class AuditDetailService {
                 .map(String::trim)
                 .filter(token -> !token.isEmpty())
                 .toList();
+    }
+
+    private List<ToolExecutionAuditItem> parseToolExecutions(String value) {
+        if (value == null || value.isBlank()) {
+            return List.of();
+        }
+        try {
+            return objectMapper.readValue(value, new TypeReference<List<ToolExecutionAuditItem>>() {
+            });
+        } catch (Exception exception) {
+            return List.of();
+        }
     }
 }

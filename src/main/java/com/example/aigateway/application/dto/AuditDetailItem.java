@@ -25,6 +25,7 @@ public record AuditDetailItem(
         Double costUsd,
         long elapsedMillis,
         String promptSummary,
+        java.util.List<ToolExecutionAuditItem> toolExecutions,
         Instant createdAt
 ) {
 }

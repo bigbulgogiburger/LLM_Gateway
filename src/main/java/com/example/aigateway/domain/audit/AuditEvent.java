@@ -23,6 +23,7 @@ public record AuditEvent(
         Integer totalTokens,
         Double costUsd,
         long elapsedMillis,
-        String promptSummary
+        String promptSummary,
+        List<com.example.aigateway.application.dto.ToolExecutionAuditItem> toolExecutions
 ) {
 }

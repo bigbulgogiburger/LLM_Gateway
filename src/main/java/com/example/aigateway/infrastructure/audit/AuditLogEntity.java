@@ -73,6 +73,9 @@ public class AuditLogEntity {
     @Column(length = 500)
     private String promptSummary;
 
+    @Column(length = 4000)
+    private String toolExecutionDetails;
+
     @Column(nullable = false)
     private Instant createdAt;
 
@@ -101,6 +104,7 @@ public class AuditLogEntity {
             Double costUsd,
             long elapsedMillis,
             String promptSummary,
+            String toolExecutionDetails,
             Instant createdAt
     ) {
         this.requestId = requestId;
@@ -124,6 +128,7 @@ public class AuditLogEntity {
         this.costUsd = costUsd;
         this.elapsedMillis = elapsedMillis;
         this.promptSummary = promptSummary;
+        this.toolExecutionDetails = toolExecutionDetails;
         this.createdAt = createdAt;
     }
 
@@ -209,6 +214,10 @@ public class AuditLogEntity {
 
     public String getPromptSummary() {
         return promptSummary;
+    }
+
+    public String getToolExecutionDetails() {
+        return toolExecutionDetails;
     }
 
     public Instant getCreatedAt() {

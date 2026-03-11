@@ -18,6 +18,7 @@ import com.example.aigateway.application.dto.ProviderResult;
 import com.example.aigateway.application.dto.ProviderStreamEvent;
 import com.example.aigateway.application.dto.ProviderToolCall;
 import com.example.aigateway.application.dto.ProviderUsage;
+import com.example.aigateway.application.dto.ToolExecutionAuditItem;
 import com.example.aigateway.application.dto.ToolExecutionResult;
 import com.example.aigateway.common.RequestIdGenerator;
 import com.example.aigateway.common.exception.GatewayErrorCodes;
@@ -125,7 +126,7 @@ public class AiGatewayService {
         if (ruleDecision.isBlocked()) {
             long elapsedMillis = Duration.between(startedAt, Instant.now()).toMillis();
             AiChatResponse response = buildBlockedResponse(command, request.provider(), ruleDecision, null, null, null, null);
-            auditLogService.log(toAuditEvent(command, response, elapsedMillis, List.of(), null, null));
+            auditLogService.log(toAuditEvent(command, response, elapsedMillis, List.of(), List.of(), null, null));
             gatewayMetricsService.recordOutcome(request.provider(), "blocked_rule", command.tenantId());
             gatewayMetricsService.recordLatency(request.provider(), "blocked_rule", command.tenantId(), elapsedMillis);
             return response;
@@ -140,7 +141,7 @@ public class AiGatewayService {
             )));
             long elapsedMillis = Duration.between(startedAt, Instant.now()).toMillis();
             AiChatResponse response = buildBlockedResponse(command, request.provider(), blockedDecision, inputModeration, null, null, null);
-            auditLogService.log(toAuditEvent(command, response, elapsedMillis, List.of(), null, null));
+            auditLogService.log(toAuditEvent(command, response, elapsedMillis, List.of(), List.of(), null, null));
             gatewayMetricsService.recordOutcome(request.provider(), "blocked_input_moderation", command.tenantId());
             gatewayMetricsService.recordLatency(request.provider(), "blocked_input_moderation", command.tenantId(), elapsedMillis);
             return response;
@@ -156,7 +157,7 @@ public class AiGatewayService {
             GuardrailDecision blockedDecision = GuardrailDecision.blocked(List.of(aiRuleResult));
             long elapsedMillis = Duration.between(startedAt, Instant.now()).toMillis();
             AiChatResponse response = buildBlockedResponse(command, request.provider(), blockedDecision, inputModeration, aiAssessment, null, null);
-            auditLogService.log(toAuditEvent(command, response, elapsedMillis, List.of(), null, null));
+            auditLogService.log(toAuditEvent(command, response, elapsedMillis, List.of(), List.of(), null, null));
             gatewayMetricsService.recordOutcome(request.provider(), "blocked_ai", command.tenantId());
             gatewayMetricsService.recordLatency(request.provider(), "blocked_ai", command.tenantId(), elapsedMillis);
             return response;
@@ -183,7 +184,7 @@ public class AiGatewayService {
                     null
             );
             quotaEnforcementService.recordProviderUsage(principal, inputText, providerResult);
-            auditLogService.log(toAuditEvent(command, response, elapsedMillis, providerOutcome.executedToolCalls(), providerResult.model(), providerResult.usage()));
+            auditLogService.log(toAuditEvent(command, response, elapsedMillis, providerOutcome.executedToolCalls(), providerOutcome.toolExecutionResults(), providerResult.model(), providerResult.usage()));
             gatewayMetricsService.recordOutcome(provider.name(), "blocked_output_moderation", command.tenantId());
             gatewayMetricsService.recordLatency(provider.name(), "blocked_output_moderation", command.tenantId(), elapsedMillis);
             return response;
@@ -201,7 +202,7 @@ public class AiGatewayService {
                     outputDecision
             );
             quotaEnforcementService.recordProviderUsage(principal, inputText, providerResult);
-            auditLogService.log(toAuditEvent(command, response, elapsedMillis, providerOutcome.executedToolCalls(), providerResult.model(), providerResult.usage()));
+            auditLogService.log(toAuditEvent(command, response, elapsedMillis, providerOutcome.executedToolCalls(), providerOutcome.toolExecutionResults(), providerResult.model(), providerResult.usage()));
             gatewayMetricsService.recordOutcome(provider.name(), "blocked_output", command.tenantId());
             gatewayMetricsService.recordLatency(provider.name(), "blocked_output", command.tenantId(), elapsedMillis);
             return response;
@@ -225,7 +226,7 @@ public class AiGatewayService {
                 ),
                 new AiChatData(outputDecision.content(), toToolCallViews(providerOutcome.executedToolCalls()))
         );
-        auditLogService.log(toAuditEvent(command, response, elapsedMillis, providerOutcome.executedToolCalls(), providerResult.model(), providerResult.usage()));
+        auditLogService.log(toAuditEvent(command, response, elapsedMillis, providerOutcome.executedToolCalls(), providerOutcome.toolExecutionResults(), providerResult.model(), providerResult.usage()));
         gatewayMetricsService.recordOutcome(provider.name(), "success", command.tenantId());
         gatewayMetricsService.recordLatency(provider.name(), "success", command.tenantId(), elapsedMillis);
         return response;
@@ -317,6 +318,7 @@ public class AiGatewayService {
             AiChatResponse response,
             long elapsedMillis,
             List<ProviderToolCall> toolCalls,
+            List<ToolExecutionResult> toolResults,
             String model,
             ProviderUsage usage
     ) {
@@ -341,7 +343,8 @@ public class AiGatewayService {
                 usage == null ? null : usage.totalTokens(),
                 usage == null ? null : usage.costUsd(),
                 elapsedMillis,
-                summarize(command.prompt())
+                summarize(command.prompt()),
+                toToolExecutionAuditItems(toolResults)
         );
     }
 
@@ -463,7 +466,7 @@ public class AiGatewayService {
                 return;
             }
             if (blocked.get()) {
-                recordBlockedStreamOutcome(command, provider, startedAt, blockedResponse.get(), toolCalls, modelRef.get(), usageRef.get());
+                recordBlockedStreamOutcome(command, provider, startedAt, blockedResponse.get(), toolCalls, List.of(), modelRef.get(), usageRef.get());
                 return;
             }
 
@@ -489,7 +492,7 @@ public class AiGatewayService {
                     ),
                     new AiChatData(emittedContent.toString(), toToolCallViews(toolCalls))
             );
-            auditLogService.log(toAuditEvent(command, successResponse, elapsedMillis, toolCalls, modelRef.get(), usageRef.get()));
+            auditLogService.log(toAuditEvent(command, successResponse, elapsedMillis, toolCalls, List.of(), modelRef.get(), usageRef.get()));
             gatewayMetricsService.recordOutcome(provider.name(), "success_stream", command.tenantId());
             gatewayMetricsService.recordLatency(provider.name(), "success_stream", command.tenantId(), elapsedMillis);
             completeEmitter(emitter, lifecycle);
@@ -677,10 +680,12 @@ public class AiGatewayService {
     private ProviderExecutionOutcome executeToolLoop(LlmProvider provider, AiGatewayCommand command, GatewayPrincipal principal) {
         ProviderResult result = providerExecutionService.execute(() -> provider.generate(command));
         List<ProviderToolCall> executedToolCalls = new ArrayList<>(result.toolCalls());
+        List<ToolExecutionResult> toolExecutionResults = new ArrayList<>();
         ProviderUsage aggregatedUsage = result.usage();
         int remainingIterations = 3;
         while (!result.toolCalls().isEmpty() && remainingIterations-- > 0) {
             List<ToolExecutionResult> toolResults = toolExecutionService.execute(principal, result.toolCalls());
+            toolExecutionResults.addAll(toolResults);
             ProviderResult previousResult = result;
             result = providerExecutionService.execute(() -> provider.continueWithToolOutputs(command, previousResult, toolResults));
             executedToolCalls.addAll(result.toolCalls());
@@ -694,7 +699,7 @@ public class AiGatewayService {
                 result.model(),
                 aggregatedUsage
         );
-        return new ProviderExecutionOutcome(aggregatedResult, executedToolCalls);
+        return new ProviderExecutionOutcome(aggregatedResult, executedToolCalls, toolExecutionResults);
     }
 
     private void streamToolLoop(
@@ -718,6 +723,7 @@ public class AiGatewayService {
             AtomicReference<AiChatResponse> blockedResponse = new AtomicReference<>();
             AtomicReference<ProviderUsage> usageRef = new AtomicReference<>(initialResult.usage());
             AtomicReference<String> modelRef = new AtomicReference<>(initialResult.model());
+            List<ToolExecutionResult> executedToolResults = new ArrayList<>();
             int remainingIterations = 3;
             while (!currentResult.toolCalls().isEmpty() && remainingIterations-- > 0) {
                 if (lifecycle.isTerminated()) {
@@ -741,6 +747,7 @@ public class AiGatewayService {
                     }
                 });
                 List<ToolExecutionResult> toolResults = toolExecutionService.execute(principal, currentResult.toolCalls());
+                executedToolResults.addAll(toolResults);
                 ProviderResult previousResult = currentResult;
                 List<ProviderToolCall> nextToolCalls = new ArrayList<>();
                 provider.streamWithToolOutputs(command, previousResult, toolResults, event -> handleProviderStreamEvent(
@@ -765,7 +772,7 @@ public class AiGatewayService {
                     return;
                 }
                 if (blocked.get()) {
-                    recordBlockedStreamOutcome(command, provider, startedAt, blockedResponse.get(), executedToolCalls, modelRef.get(), usageRef.get());
+                    recordBlockedStreamOutcome(command, provider, startedAt, blockedResponse.get(), executedToolCalls, executedToolResults, modelRef.get(), usageRef.get());
                     return;
                 }
                 currentResult = new ProviderResult(
@@ -794,7 +801,7 @@ public class AiGatewayService {
                             null
                     );
                     emitBlockedAndComplete(emitter, blockedResponseBody);
-                    recordBlockedStreamOutcome(command, provider, startedAt, blockedResponseBody, executedToolCalls, modelRef.get(), usageRef.get());
+                    recordBlockedStreamOutcome(command, provider, startedAt, blockedResponseBody, executedToolCalls, executedToolResults, modelRef.get(), usageRef.get());
                     return;
                 }
                 OutputGuardrailDecision outputDecision = outputGuardrailService.evaluate(rawContent.toString(), command);
@@ -809,7 +816,7 @@ public class AiGatewayService {
                             outputDecision
                     );
                     emitBlockedAndComplete(emitter, blockedResponseBody);
-                    recordBlockedStreamOutcome(command, provider, startedAt, blockedResponseBody, executedToolCalls, modelRef.get(), usageRef.get());
+                    recordBlockedStreamOutcome(command, provider, startedAt, blockedResponseBody, executedToolCalls, executedToolResults, modelRef.get(), usageRef.get());
                     return;
                 }
                 emittedContent.append(outputDecision.content());
@@ -841,7 +848,7 @@ public class AiGatewayService {
                     emittedContent.toString(),
                     executedToolCalls
             );
-            auditLogService.log(toAuditEvent(command, successResponse, elapsedMillis, executedToolCalls, modelRef.get(), usageRef.get()));
+            auditLogService.log(toAuditEvent(command, successResponse, elapsedMillis, executedToolCalls, executedToolResults, modelRef.get(), usageRef.get()));
             gatewayMetricsService.recordOutcome(provider.name(), "success_stream", command.tenantId());
             gatewayMetricsService.recordLatency(provider.name(), "success_stream", command.tenantId(), elapsedMillis);
             sendEvent(emitter, lifecycle, SseEmitter.event()
@@ -893,6 +900,7 @@ public class AiGatewayService {
             Instant startedAt,
             AiChatResponse response,
             List<ProviderToolCall> toolCalls,
+            List<ToolExecutionResult> toolResults,
             String model,
             ProviderUsage usage
     ) {
@@ -900,7 +908,7 @@ public class AiGatewayService {
             return;
         }
         long elapsedMillis = Duration.between(startedAt, Instant.now()).toMillis();
-        auditLogService.log(toAuditEvent(command, response, elapsedMillis, toolCalls, model, usage));
+        auditLogService.log(toAuditEvent(command, response, elapsedMillis, toolCalls, toolResults, model, usage));
         String outcome = response.guardrail().ruleResults().stream()
                 .map(RuleResultView::code)
                 .filter(code -> code != null && !code.isBlank())
@@ -1034,9 +1042,26 @@ public class AiGatewayService {
         );
     }
 
+    private List<ToolExecutionAuditItem> toToolExecutionAuditItems(List<ToolExecutionResult> toolResults) {
+        if (toolResults == null || toolResults.isEmpty()) {
+            return List.of();
+        }
+        return toolResults.stream()
+                .map(result -> new ToolExecutionAuditItem(
+                        result.callId(),
+                        result.toolName(),
+                        result.argumentsSummary(),
+                        result.durationMillis(),
+                        result.attempts(),
+                        result.truncated()
+                ))
+                .toList();
+    }
+
     private record ProviderExecutionOutcome(
             ProviderResult result,
-            List<ProviderToolCall> executedToolCalls
+            List<ProviderToolCall> executedToolCalls,
+            List<ToolExecutionResult> toolExecutionResults
     ) {
     }
 

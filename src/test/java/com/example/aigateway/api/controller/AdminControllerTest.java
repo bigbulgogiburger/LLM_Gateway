@@ -187,6 +187,9 @@ class AdminControllerTest {
                 0.0042d,
                 150,
                 "날씨와 시간을 조회해줘",
+                """
+                        [{"callId":"call-weather","toolName":"lookup_weather","argumentsSummary":"{\\"city\\":\\"Seoul\\"}","durationMillis":12,"attempts":1,"truncated":false}]
+                        """,
                 Instant.now()
         ));
 
@@ -197,6 +200,9 @@ class AdminControllerTest {
                 .andExpect(jsonPath("$.model").value("gpt-4.1-mini"))
                 .andExpect(jsonPath("$.toolCallCount").value(2))
                 .andExpect(jsonPath("$.toolNames[1]").value("lookup_time"))
+                .andExpect(jsonPath("$.toolExecutions[0].callId").value("call-weather"))
+                .andExpect(jsonPath("$.toolExecutions[0].toolName").value("lookup_weather"))
+                .andExpect(jsonPath("$.toolExecutions[0].attempts").value(1))
                 .andExpect(jsonPath("$.totalTokens").value(200))
                 .andExpect(jsonPath("$.costUsd").value(0.0042d));
     }
@@ -227,6 +233,7 @@ class AdminControllerTest {
                 0.003d,
                 120,
                 "weather",
+                "[]",
                 now.minus(2, ChronoUnit.HOURS)
         ));
         auditLogRepository.save(new AuditLogEntity(
@@ -251,6 +258,7 @@ class AdminControllerTest {
                 0.001d,
                 80,
                 "blocked",
+                "[]",
                 now.minus(1, ChronoUnit.HOURS)
         ));
         auditLogRepository.save(new AuditLogEntity(
@@ -275,6 +283,7 @@ class AdminControllerTest {
                 0.002d,
                 60,
                 "time",
+                "[]",
                 now.minus(1, ChronoUnit.HOURS)
         ));
         auditLogRepository.save(new AuditLogEntity(
@@ -299,6 +308,7 @@ class AdminControllerTest {
                 0.002d,
                 70,
                 "previous-window",
+                "[]",
                 now.minus(30, ChronoUnit.HOURS)
         ));
 
@@ -383,6 +393,7 @@ class AdminControllerTest {
                 0.0d,
                 30,
                 "day-1",
+                "[]",
                 now.minus(26, ChronoUnit.HOURS)
         ));
         auditLogRepository.save(new AuditLogEntity(
@@ -407,6 +418,7 @@ class AdminControllerTest {
                 0.0d,
                 30,
                 "day-2",
+                "[]",
                 now.minus(4, ChronoUnit.HOURS)
         ));
 
@@ -458,6 +470,7 @@ class AdminControllerTest {
                 0.004d,
                 50,
                 "overview-success",
+                "[]",
                 now.minus(1, ChronoUnit.HOURS)
         ));
         auditLogRepository.save(new AuditLogEntity(
@@ -482,6 +495,7 @@ class AdminControllerTest {
                 0.001d,
                 40,
                 "overview-blocked",
+                "[]",
                 now.minus(30, ChronoUnit.MINUTES)
         ));
         auditLogRepository.save(new AuditLogEntity(
@@ -506,6 +520,7 @@ class AdminControllerTest {
                 0.0005d,
                 30,
                 "overview-mock",
+                "[]",
                 now.minus(2, ChronoUnit.HOURS)
         ));
 
